@@ -1,0 +1,89 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera permission for QR scanning -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Internet for potential future sync -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- SMS permissions for auto-detecting bank debit SMS -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
+    <uses-permission android:name="android.permission.READ_SMS"/>
+    
+    <application
+        android:label="PayTrace"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- NotificationListenerService for auto-detecting UPI payments -->
+        <service
+            android:name=".PaymentNotificationListener"
+            android:exported="true"
+            android:enabled="true"
+            android:directBootAware="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService"/>
+            </intent-filter>
+        </service>
+
+        <!-- SMS BroadcastReceiver for auto-detecting bank debit SMS -->
+        <receiver
+            android:name=".SmsBroadcastReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+            </intent-filter>
+        </receiver>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required for discovering installed UPI apps (Android 11+) -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="upi"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN"/>
+            <category android:name="android.intent.category.LAUNCHER"/>
+        </intent>
+        <!-- Explicitly declare known UPI app packages for visibility -->
+        <package android:name="com.google.android.apps.nbu.paisa.user"/>
+        <package android:name="com.phonepe.app"/>
+        <package android:name="net.one97.paytm"/>
+        <package android:name="in.org.npci.upiapp"/>
+        <package android:name="com.whatsapp"/>
+        <package android:name="in.amazon.mShop.android.shopping"/>
+        <package android:name="com.dreamplug.androidapp"/>
+        <package android:name="com.csam.icici.bank.imobile"/>
+        <package android:name="com.mobikwik_new"/>
+        <package android:name="com.freecharge"/>
+        <package android:name="money.jupiter"/>
+        <package android:name="com.epifi.paisa"/>
+        <package android:name="com.myairtelapp"/>
+        <package android:name="com.sbi.upi"/>
+        <package android:name="com.mgs.induspsp"/>
+        <package android:name="com.infrasoft.uboi"/>
+        <package android:name="com.lcode.nsdlbank"/>
+        <package android:name="com.slice"/>
+    </queries>
+</manifest>
