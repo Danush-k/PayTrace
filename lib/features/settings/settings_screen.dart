@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/database/app_database.dart';
 import '../../services/export_service.dart';
+import '../../services/upi_service.dart';
 import '../../state/providers.dart';
 
 /// Settings screen — theme, budget, export, about
@@ -40,6 +42,11 @@ class SettingsScreen extends ConsumerWidget {
           // ─── Data Section ───
           _SectionHeader(title: 'Data'),
           _buildExportTile(context, ref),
+
+          const SizedBox(height: 8),
+
+          // ─── Permissions Section (Android only) ───
+          if (!kIsWeb) ..._buildPermissionsSection(context, ref),
 
           const SizedBox(height: 8),
 
@@ -160,6 +167,45 @@ class SettingsScreen extends ConsumerWidget {
         trailing: const SizedBox.shrink(),
       ),
     );
+  }
+
+  List<Widget> _buildPermissionsSection(BuildContext context, WidgetRef ref) {
+    final notifAsync = ref.watch(notificationAccessProvider);
+    final hasNotif = notifAsync.valueOrNull ?? false;
+
+    return [
+      _SectionHeader(title: 'Permissions'),
+      _SettingsTile(
+        icon: Icons.notifications_outlined,
+        title: 'Notification Access',
+        subtitle: hasNotif
+            ? 'Enabled — detecting UPI app payments'
+            : 'Optional — detect payments from GPay, PhonePe etc.',
+        trailing: Switch(
+          value: hasNotif,
+          onChanged: (_) async {
+            await UpiService.openNotificationSettings();
+            // Refresh after returning from settings
+            ref.invalidate(notificationAccessProvider);
+          },
+        ),
+        onTap: () async {
+          await UpiService.openNotificationSettings();
+          ref.invalidate(notificationAccessProvider);
+        },
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Text(
+          'This is optional. SMS detection alone is sufficient for most users. '
+          'Enable this only if you want real-time payment alerts from UPI apps.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                color: Colors.grey.shade500,
+              ),
+        ),
+      ),
+    ];
   }
 
   Widget _buildExportTile(BuildContext context, WidgetRef ref) {

@@ -1,18 +1,20 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../services/upi_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/sms_service.dart';
 import '../../state/providers.dart';
 
 /// SMS permission provider
 final smsPermissionProvider = FutureProvider<bool>((ref) {
+  if (kIsWeb) return Future.value(false);
   return SmsService.hasSmsPermission();
 });
 
-/// Banner widget that prompts user to enable SMS + notification access.
-/// SMS is the primary detection method; notifications are secondary.
+/// Banner widget that prompts user to enable SMS access.
+/// SMS is the primary and sufficient detection method.
+/// Notification listener is optional and available in Settings.
 class NotificationPermissionBanner extends ConsumerWidget {
   const NotificationPermissionBanner({super.key});
 
@@ -21,42 +23,28 @@ class NotificationPermissionBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (kIsWeb) return const SizedBox.shrink();
+
     final smsAsync = ref.watch(smsPermissionProvider);
-    final notifAsync = ref.watch(notificationAccessProvider);
-
     final hasSms = smsAsync.valueOrNull ?? false;
-    final hasNotif = notifAsync.valueOrNull ?? false;
 
-    // If both permissions granted, ensure listeners are active (once)
-    if (hasSms && hasNotif) {
+    // If SMS permission granted, ensure listeners are active and hide banner
+    if (hasSms) {
       _ensureListenersActiveOnce();
       return const SizedBox.shrink();
     }
 
-    // If at least SMS is granted, ensure SMS stream + start listeners
-    if (hasSms) {
-      _ensureListenersActiveOnce();
-    }
-
-    // Show banner if either permission is missing
-    if (hasSms && !hasNotif) {
-      // SMS is granted — notification is optional, show subtle hint
-      return const SizedBox.shrink(); // SMS alone is enough
-    }
-
-    return _buildBanner(context, ref, hasSms: hasSms, hasNotif: hasNotif);
+    return _buildBanner(context, ref);
   }
 
   void _ensureListenersActiveOnce() {
     if (_listenersActivated) return;
     _listenersActivated = true;
-    UpiService.rebindNotificationListener();
     NotificationService.paymentNotifications;
     SmsService.bankSmsStream;
   }
 
-  Widget _buildBanner(BuildContext context, WidgetRef ref,
-      {required bool hasSms, required bool hasNotif}) {
+  Widget _buildBanner(BuildContext context, WidgetRef ref) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(16),
@@ -101,52 +89,30 @@ class NotificationPermissionBanner extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
 
-          // SMS permission button (primary)
-          if (!hasSms)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  final granted = await SmsService.requestSmsPermission();
-                  if (granted) {
-                    ref.invalidate(smsPermissionProvider);
-                  }
-                },
-                icon: const Icon(Icons.sms_rounded, size: 16),
-                label: const Text('Allow SMS Access'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber.shade700,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
+          // SMS permission button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final granted = await SmsService.requestSmsPermission();
+                if (granted) {
+                  ref.invalidate(smsPermissionProvider);
+                }
+              },
+              icon: const Icon(Icons.sms_rounded, size: 16),
+              label: const Text('Allow SMS Access'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber.shade700,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
-
-          if (!hasSms) const SizedBox(height: 8),
-
-          // Notification access button (secondary)
-          if (!hasNotif)
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  await UpiService.openNotificationSettings();
-                  ref.invalidate(notificationAccessProvider);
-                },
-                icon: const Icon(Icons.notifications_rounded, size: 16),
-                label: const Text('Enable Notification Access (optional)'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.grey.shade600,
-                  side: BorderSide(color: Colors.grey.shade400),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
+          ),
 
           const SizedBox(height: 8),
           Text(
-            'PayTrace only reads bank debit SMS and UPI app notifications. '
-            'No personal data is accessed.',
+            'PayTrace only reads bank debit/credit SMS to detect transactions. '
+            'No personal data is stored or shared.',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   fontSize: 11,
                   color: Colors.grey.shade500,
