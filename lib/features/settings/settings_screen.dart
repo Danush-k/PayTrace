@@ -18,7 +18,8 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final now = DateTime.now();
-    final budgetAsync = ref.watch(monthlyBudgetProvider(now));
+    final monthKey = DateTime(now.year, now.month);
+    final budgetAsync = ref.watch(monthlyBudgetProvider(monthKey));
 
     return Scaffold(
       appBar: AppBar(

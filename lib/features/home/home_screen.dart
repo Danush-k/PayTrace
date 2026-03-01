@@ -220,11 +220,12 @@ class HomeScreen extends ConsumerWidget {
 
   Widget _buildMonthlySummary(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
-    final monthlySpending = ref.watch(monthlySpendingProvider(now));
-    final monthlyReceived = ref.watch(monthlyReceivedProvider(now));
-    final categorySpending = ref.watch(categorySpendingProvider(now));
-    final budgetProgress = ref.watch(budgetProgressProvider(now));
-    final budgetAsync = ref.watch(monthlyBudgetProvider(now));
+    final monthKey = DateTime(now.year, now.month);
+    final monthlySpending = ref.watch(monthlySpendingProvider(monthKey));
+    final monthlyReceived = ref.watch(monthlyReceivedProvider(monthKey));
+    final categorySpending = ref.watch(categorySpendingProvider(monthKey));
+    final budgetProgress = ref.watch(budgetProgressProvider(monthKey));
+    final budgetAsync = ref.watch(monthlyBudgetProvider(monthKey));
     final smsSync = ref.watch(smsSyncProvider);
 
     return Padding(
