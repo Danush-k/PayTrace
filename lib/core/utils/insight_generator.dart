@@ -2,6 +2,7 @@ import '../../core/constants/app_constants.dart';
 import 'spend_velocity_engine.dart';
 import 'discipline_score_engine.dart';
 import 'category_drift_engine.dart';
+import 'anomaly_detector.dart';
 
 /// Template-based Natural Language Generation engine.
 /// Converts ML/analysis outputs into human-readable insight tips.
@@ -13,8 +14,14 @@ class InsightGenerator {
     required SpendVelocityResult velocity,
     required DisciplineScoreResult discipline,
     required CategoryDriftResult drift,
+    AnomalyResult? anomalies,
   }) {
     final insights = <Insight>[];
+
+    // ── Anomaly alerts (highest priority) ──
+    if (anomalies != null) {
+      _addAnomalyInsights(insights, anomalies);
+    }
 
     // ── Spend velocity insights ──
     _addVelocityInsights(insights, velocity);
@@ -32,6 +39,44 @@ class InsightGenerator {
     insights.sort((a, b) => a.priority.compareTo(b.priority));
 
     return insights;
+  }
+
+  static void _addAnomalyInsights(
+      List<Insight> insights, AnomalyResult anomalies) {
+    if (anomalies.alerts.isEmpty) return;
+
+    // Overall risk score insight
+    if (anomalies.riskScore >= 60) {
+      insights.add(Insight(
+        icon: '🚨',
+        title: 'High Risk Score: ${anomalies.riskScore}',
+        message:
+            'Multiple unusual transactions detected this month. Review flagged items below.',
+        priority: 0,
+        type: InsightType.warning,
+      ));
+    } else if (anomalies.riskScore >= 30) {
+      insights.add(Insight(
+        icon: '⚡',
+        title: 'Some Unusual Activity',
+        message:
+            '${anomalies.alerts.length} transaction(s) flagged as unusual. Risk score: ${anomalies.riskScore}/100.',
+        priority: 2,
+        type: InsightType.warning,
+      ));
+    }
+
+    // Top 3 individual alerts
+    final topAlerts = anomalies.alerts.take(3);
+    for (final alert in topAlerts) {
+      insights.add(Insight(
+        icon: alert.icon,
+        title: alert.title,
+        message: alert.message,
+        priority: alert.severity <= 3 ? 1 : 4,
+        type: alert.severity <= 2 ? InsightType.warning : InsightType.info,
+      ));
+    }
   }
 
   static void _addVelocityInsights(

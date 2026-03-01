@@ -429,6 +429,55 @@ class AppDatabase extends _$AppDatabase {
       ));
     }
   }
+
+  // ═══════════════════════════════════════════
+  //  DAILY SPENDING (for heatmap calendar)
+  // ═══════════════════════════════════════════
+
+  /// Returns a map of day-of-month → total DEBIT amount for the given month.
+  /// e.g. {1: 350.0, 2: 0.0, 5: 1200.0, ...}
+  Future<Map<int, double>> getDailySpending(int year, int month) async {
+    final start = DateTime(year, month, 1);
+    final end = DateTime(year, month + 1, 0, 23, 59, 59);
+
+    final rows = await (select(transactions)
+          ..where((t) =>
+              t.createdAt.isBiggerOrEqualValue(start) &
+              t.createdAt.isSmallerOrEqualValue(end) &
+              t.direction.equals('DEBIT') &
+              t.status.equals('SUCCESS')))
+        .get();
+
+    final daily = <int, double>{};
+    for (final txn in rows) {
+      final day = txn.createdAt.day;
+      daily[day] = (daily[day] ?? 0) + txn.amount;
+    }
+    return daily;
+  }
+
+  /// Returns total monthly spent (DEBIT) amounts for given months.
+  /// Returns list in same order as input dates.
+  Future<List<double>> getMonthlySpendingHistory(
+      List<DateTime> months) async {
+    final results = <double>[];
+    for (final m in months) {
+      final spent = await getMonthlySpent(m.year, m.month);
+      results.add(spent);
+    }
+    return results;
+  }
+
+  /// Returns total monthly received (CREDIT) amounts for given months.
+  Future<List<double>> getMonthlyIncomeHistory(
+      List<DateTime> months) async {
+    final results = <double>[];
+    for (final m in months) {
+      final received = await getMonthlyReceived(m.year, m.month);
+      results.add(received);
+    }
+    return results;
+  }
 }
 
 

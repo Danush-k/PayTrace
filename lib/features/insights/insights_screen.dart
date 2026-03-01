@@ -7,6 +7,8 @@ import '../../core/utils/spend_velocity_engine.dart';
 import '../../core/utils/discipline_score_engine.dart';
 import '../../core/utils/category_drift_engine.dart';
 import '../../core/utils/insight_generator.dart';
+import '../../core/utils/anomaly_detector.dart';
+import '../../core/utils/personality_engine.dart';
 import '../../state/providers.dart';
 import '../../data/database/app_database.dart';
 
@@ -61,10 +63,28 @@ final insightsProvider = FutureProvider.autoDispose<InsightsData?>((ref) async {
     previousMonthsTxns: prevMonths,
   );
 
+  // Run anomaly detection
+  final anomalies = AnomalyDetector.detect(
+    currentMonthTxns: currentTxns,
+    previousMonthsTxns: prevMonths,
+  );
+
+  // Run personality engine
+  final personality = PersonalityEngine.analyze(
+    discipline: discipline,
+    drift: drift,
+    velocity: velocity,
+    currentTransactions: currentTxns,
+  );
+
+  // Get daily spending for heatmap
+  final dailySpending = await db.getDailySpending(now.year, now.month);
+
   final insights = InsightGenerator.generate(
     velocity: velocity,
     discipline: discipline,
     drift: drift,
+    anomalies: anomalies,
   );
 
   return InsightsData(
@@ -72,6 +92,9 @@ final insightsProvider = FutureProvider.autoDispose<InsightsData?>((ref) async {
     discipline: discipline,
     drift: drift,
     insights: insights,
+    anomalies: anomalies,
+    personality: personality,
+    dailySpending: dailySpending,
   );
 });
 
@@ -80,12 +103,18 @@ class InsightsData {
   final DisciplineScoreResult discipline;
   final CategoryDriftResult drift;
   final List<Insight> insights;
+  final AnomalyResult anomalies;
+  final SpendingPersonality personality;
+  final Map<int, double> dailySpending;
 
   const InsightsData({
     required this.velocity,
     required this.discipline,
     required this.drift,
     required this.insights,
+    required this.anomalies,
+    required this.personality,
+    required this.dailySpending,
   });
 }
 
@@ -195,11 +224,26 @@ class InsightsScreen extends ConsumerWidget {
 
                 const SizedBox(height: 8),
 
+                // ── Personality Card ──
+                _PersonalityCard(personality: data.personality),
+
+                const SizedBox(height: 4),
+
                 // ── Score Overview (compact row) ──
                 _ScoreOverviewCard(
                   discipline: data.discipline,
                   velocity: data.velocity,
                 ),
+
+                // ── Anomaly Alerts ──
+                if (data.anomalies.alerts.isNotEmpty) ...[
+                  _SectionLabel(
+                    icon: Icons.gpp_maybe_outlined,
+                    label: 'Anomaly Alerts',
+                    color: AppTheme.error,
+                  ),
+                  _AnomalyAlertsBanner(anomalies: data.anomalies),
+                ],
 
                 // ── Warnings Section ──
                 if (warnings.isNotEmpty) ...[
@@ -227,6 +271,20 @@ class InsightsScreen extends ConsumerWidget {
                     color: AppTheme.warning,
                   ),
                   _CategoryDriftCard(drift: data.drift),
+                ],
+
+                // ── Spending Heatmap Calendar ──
+                if (data.dailySpending.isNotEmpty) ...[
+                  _SectionLabel(
+                    icon: Icons.calendar_month_rounded,
+                    label: 'Spending Heatmap',
+                    color: AppTheme.primary,
+                  ),
+                  _SpendingHeatmapCard(
+                    dailySpending: data.dailySpending,
+                    year: now.year,
+                    month: now.month,
+                  ),
                 ],
 
                 // ── Time of Day ──
@@ -1131,6 +1189,532 @@ class _InsightTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+// ═══════════════════════════════════════════
+//  PERSONALITY CARD
+// ═══════════════════════════════════════════
+
+class _PersonalityCard extends StatelessWidget {
+  final SpendingPersonality personality;
+  const _PersonalityCard({required this.personality});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: personality.gradientColors
+                .map((c) => Color(c))
+                .toList(),
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Emoji + Title row
+            Row(
+              children: [
+                Text(
+                  personality.emoji,
+                  style: const TextStyle(fontSize: 36),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'YOUR SPENDING PERSONA',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        personality.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // Description
+            Text(
+              personality.description,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Trait chips
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TraitChip(
+                  icon: personality.timeTrait.icon,
+                  label: personality.timeTrait.label,
+                ),
+                _TraitChip(
+                  icon: personality.categoryTrait.icon,
+                  label: personality.categoryTrait.label,
+                ),
+                _TraitChip(
+                  icon: personality.paceTrait.icon,
+                  label: personality.paceTrait.label,
+                ),
+                _TraitChip(
+                  icon: personality.disciplineTrait.icon,
+                  label: personality.disciplineTrait.label,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TraitChip extends StatelessWidget {
+  final String icon;
+  final String label;
+  const _TraitChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(icon, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════
+//  ANOMALY ALERTS BANNER
+// ═══════════════════════════════════════════
+
+class _AnomalyAlertsBanner extends StatelessWidget {
+  final AnomalyResult anomalies;
+  const _AnomalyAlertsBanner({required this.anomalies});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppTheme.error.withValues(alpha: 0.3),
+          ),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Risk score header
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _riskColor(anomalies.riskScore)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.shield_outlined,
+                        size: 14,
+                        color: _riskColor(anomalies.riskScore),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Risk Score: ${anomalies.riskScore}',
+                        style: TextStyle(
+                          color: _riskColor(anomalies.riskScore),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '${anomalies.alerts.length} flagged',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: isDark
+                        ? AppTheme.textSecondaryDark
+                        : AppTheme.textSecondaryLight,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Alert items
+            ...anomalies.alerts.take(4).map((alert) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(alert.icon, style: const TextStyle(fontSize: 18)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              alert.title,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              alert.message,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: isDark
+                                    ? AppTheme.textSecondaryDark
+                                    : AppTheme.textSecondaryLight,
+                                fontSize: 11,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Severity indicator
+                      Container(
+                        width: 8,
+                        height: 8,
+                        margin: const EdgeInsets.only(top: 6),
+                        decoration: BoxDecoration(
+                          color: alert.severity <= 2
+                              ? AppTheme.error
+                              : alert.severity <= 3
+                                  ? AppTheme.warning
+                                  : AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _riskColor(int score) {
+    if (score >= 60) return AppTheme.error;
+    if (score >= 30) return AppTheme.warning;
+    return AppTheme.success;
+  }
+}
+
+// ═══════════════════════════════════════════
+//  SPENDING HEATMAP CALENDAR
+// ═══════════════════════════════════════════
+
+class _SpendingHeatmapCard extends StatelessWidget {
+  final Map<int, double> dailySpending;
+  final int year;
+  final int month;
+
+  const _SpendingHeatmapCard({
+    required this.dailySpending,
+    required this.year,
+    required this.month,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+    final firstWeekday = DateTime(year, month, 1).weekday; // 1=Mon, 7=Sun
+    final today = DateTime.now().day;
+
+    // Calculate percentile thresholds for coloring
+    final values = dailySpending.values.where((v) => v > 0).toList()..sort();
+    final p25 = values.isNotEmpty
+        ? values[(values.length * 0.25).floor()]
+        : 0.0;
+    final p50 = values.isNotEmpty
+        ? values[(values.length * 0.50).floor()]
+        : 0.0;
+    final p75 = values.isNotEmpty
+        ? values[(values.length * 0.75).floor()]
+        : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+          ),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Weekday headers
+            Row(
+              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+                  .map((d) => Expanded(
+                        child: Center(
+                          child: Text(
+                            d,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: isDark
+                                  ? AppTheme.textSecondaryDark
+                                  : AppTheme.textSecondaryLight,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 8),
+
+            // Calendar grid
+            _buildCalendarGrid(
+              context,
+              daysInMonth: daysInMonth,
+              firstWeekday: firstWeekday,
+              today: today,
+              isDark: isDark,
+              p25: p25,
+              p50: p50,
+              p75: p75,
+            ),
+
+            const SizedBox(height: 14),
+
+            // Legend
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _LegendDot(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
+                  label: 'None',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 12),
+                _LegendDot(
+                  color: const Color(0xFFA5D6A7),
+                  label: 'Low',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 12),
+                _LegendDot(
+                  color: const Color(0xFFFFCC02),
+                  label: 'Med',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 12),
+                _LegendDot(
+                  color: const Color(0xFFFF8A65),
+                  label: 'High',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 12),
+                _LegendDot(
+                  color: const Color(0xFFEF5350),
+                  label: 'Very High',
+                  isDark: isDark,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalendarGrid(
+    BuildContext context, {
+    required int daysInMonth,
+    required int firstWeekday,
+    required int today,
+    required bool isDark,
+    required double p25,
+    required double p50,
+    required double p75,
+  }) {
+    final rows = <Widget>[];
+    int dayCounter = 1;
+
+    // Calculate total rows needed
+    final totalCells = (firstWeekday - 1) + daysInMonth;
+    final totalRows = (totalCells / 7).ceil();
+
+    for (int row = 0; row < totalRows; row++) {
+      final cells = <Widget>[];
+      for (int col = 0; col < 7; col++) {
+        final cellIndex = row * 7 + col;
+        if (cellIndex < firstWeekday - 1 || dayCounter > daysInMonth) {
+          cells.add(const Expanded(child: SizedBox(height: 36)));
+        } else {
+          final day = dayCounter;
+          final amount = dailySpending[day] ?? 0;
+          final isToday = day == today;
+          final isFuture = day > today;
+
+          cells.add(Expanded(
+            child: Tooltip(
+              message: amount > 0
+                  ? 'Day $day: ₹${amount.toStringAsFixed(0)}'
+                  : 'Day $day: No spending',
+              child: Container(
+                height: 36,
+                margin: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: isFuture
+                      ? (isDark
+                          ? Colors.white.withValues(alpha: 0.03)
+                          : Colors.black.withValues(alpha: 0.02))
+                      : _heatColor(amount, p25, p50, p75, isDark),
+                  borderRadius: BorderRadius.circular(6),
+                  border: isToday
+                      ? Border.all(color: AppTheme.primary, width: 2)
+                      : null,
+                ),
+                child: Center(
+                  child: Text(
+                    '$day',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: isToday ? FontWeight.bold : FontWeight.w500,
+                      color: isToday
+                          ? AppTheme.primary
+                          : isFuture
+                              ? (isDark
+                                  ? Colors.white.withValues(alpha: 0.2)
+                                  : Colors.black.withValues(alpha: 0.2))
+                              : (isDark ? Colors.white : Colors.black87),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ));
+          dayCounter++;
+        }
+      }
+      rows.add(Row(children: cells));
+    }
+
+    return Column(children: rows);
+  }
+
+  Color _heatColor(
+      double amount, double p25, double p50, double p75, bool isDark) {
+    if (amount <= 0) {
+      return isDark
+          ? Colors.white.withValues(alpha: 0.06)
+          : Colors.black.withValues(alpha: 0.04);
+    }
+    if (amount <= p25) return const Color(0xFFA5D6A7); // light green
+    if (amount <= p50) return const Color(0xFFFFCC02); // yellow
+    if (amount <= p75) return const Color(0xFFFF8A65); // orange
+    return const Color(0xFFEF5350); // red
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  final bool isDark;
+  const _LegendDot(
+      {required this.color, required this.label, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: isDark
+                ? AppTheme.textSecondaryDark
+                : AppTheme.textSecondaryLight,
+          ),
+        ),
+      ],
     );
   }
 }
