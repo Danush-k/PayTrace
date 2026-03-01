@@ -170,35 +170,23 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   List<Widget> _buildPermissionsSection(BuildContext context, WidgetRef ref) {
-    final notifAsync = ref.watch(notificationAccessProvider);
-    final hasNotif = notifAsync.valueOrNull ?? false;
-
     return [
       _SectionHeader(title: 'Permissions'),
       _SettingsTile(
-        icon: Icons.notifications_outlined,
-        title: 'Notification Access',
-        subtitle: hasNotif
-            ? 'Enabled — detecting UPI app payments'
-            : 'Optional — detect payments from GPay, PhonePe etc.',
-        trailing: Switch(
-          value: hasNotif,
-          onChanged: (_) async {
-            await UpiService.openNotificationSettings();
-            // Refresh after returning from settings
-            ref.invalidate(notificationAccessProvider);
-          },
-        ),
+        icon: Icons.sms_outlined,
+        title: 'SMS Access',
+        subtitle: 'Required for auto-detecting bank transactions',
+        trailing: Icon(Icons.chevron_right_rounded,
+            color: Theme.of(context).textTheme.bodyMedium?.color),
         onTap: () async {
-          await UpiService.openNotificationSettings();
-          ref.invalidate(notificationAccessProvider);
+          await UpiService.openAppSettings();
         },
       ),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Text(
-          'This is optional. SMS detection alone is sufficient for most users. '
-          'Enable this only if you want real-time payment alerts from UPI apps.',
+          'If SMS permission is not working, open PayTrace in phone Settings, '
+          'tap ⋮ (3 dots) at top right, and enable "Allow restricted settings".',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 fontSize: 11,
                 color: Colors.grey.shade500,

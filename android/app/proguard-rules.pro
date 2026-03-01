@@ -5,6 +5,3 @@
 
 # Keep PayTrace notification listener
 -keep class com.paytrace.paytrace.PaymentNotificationListener { *; }
-
-# Keep PayTrace SMS broadcast receiver
--keep class com.paytrace.paytrace.SmsBroadcastReceiver { *; }

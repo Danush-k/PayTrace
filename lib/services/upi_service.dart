@@ -156,6 +156,16 @@ class UpiService {
     }
   }
 
+  /// Open the app's details page in Android system settings
+  /// (Settings → Apps → PayTrace) so user can enable restricted settings
+  static Future<void> openAppSettings() async {
+    try {
+      await _channel.invokeMethod('openAppSettings');
+    } on PlatformException catch (e) {
+      debugPrint('PayTrace: openAppSettings error: ${e.message}');
+    }
+  }
+
   /// Force Android to rebind the NotificationListenerService
   /// (fixes NLS killed by battery optimization on some OEM phones)
   static Future<bool> rebindNotificationListener() async {

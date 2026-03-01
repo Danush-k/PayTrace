@@ -18,11 +18,9 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.paytrace.paytrace/upi"
     private val EVENT_CHANNEL = "com.paytrace.paytrace/notifications"
-    private val SMS_EVENT_CHANNEL = "com.paytrace.paytrace/sms"
     private val SMS_PERMISSION_CODE = 2001
 
     private var notificationEventSink: EventChannel.EventSink? = null
-    private var smsEventSink: EventChannel.EventSink? = null
     private var pendingSmsPermissionResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -84,8 +82,19 @@ class MainActivity : FlutterActivity() {
                             result.success("no_sink")
                         }
                     }
+                    "openAppSettings" -> {
+                        try {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.fromParts("package", packageName, null)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
                     "hasSmsPermission" -> {
-                        val granted = android.Manifest.permission.RECEIVE_SMS.let {
+                        val granted = android.Manifest.permission.READ_SMS.let {
                             androidx.core.content.ContextCompat.checkSelfPermission(this, it)
                         } == android.content.pm.PackageManager.PERMISSION_GRANTED
                         result.success(granted)
@@ -95,7 +104,6 @@ class MainActivity : FlutterActivity() {
                         androidx.core.app.ActivityCompat.requestPermissions(
                             this,
                             arrayOf(
-                                android.Manifest.permission.RECEIVE_SMS,
                                 android.Manifest.permission.READ_SMS,
                             ),
                             SMS_PERMISSION_CODE
@@ -139,35 +147,6 @@ class MainActivity : FlutterActivity() {
                 }
             })
 
-        // Event channel for streaming bank SMS
-        EventChannel(flutterEngine.dartExecutor.binaryMessenger, SMS_EVENT_CHANNEL)
-            .setStreamHandler(object : EventChannel.StreamHandler {
-                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
-                    smsEventSink = events
-                    SmsBroadcastReceiver.onSmsReceived = { data ->
-                        runOnUiThread {
-                            smsEventSink?.success(data)
-                        }
-                    }
-                    android.util.Log.d("PayTrace", "SMS event channel listening")
-
-                    val pending = SmsBroadcastReceiver.drainPending()
-                    if (pending.isNotEmpty()) {
-                        android.util.Log.d("PayTrace", "Draining ${pending.size} buffered SMS")
-                        for (data in pending) {
-                            runOnUiThread {
-                                smsEventSink?.success(data)
-                            }
-                        }
-                    }
-                }
-
-                override fun onCancel(arguments: Any?) {
-                    smsEventSink = null
-                    SmsBroadcastReceiver.onSmsReceived = null
-                    android.util.Log.d("PayTrace", "SMS event channel cancelled")
-                }
-            })
     }
 
     override fun onRequestPermissionsResult(
