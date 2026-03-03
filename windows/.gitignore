@@ -1,8 +1,11 @@
 flutter/ephemeral/
 
+<<<<<<< HEAD
 # Build output
 build/
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 # Visual Studio user-specific files.
 *.suo
 *.user

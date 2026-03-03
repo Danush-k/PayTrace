@@ -178,6 +178,7 @@ class $TransactionsTable extends Transactions
     requiredDuringInsert: false,
     defaultValue: const Constant('Others'),
   );
+<<<<<<< HEAD
   static const VerificationMeta _directionMeta = const VerificationMeta(
     'direction',
   );
@@ -190,6 +191,8 @@ class $TransactionsTable extends Transactions
     requiredDuringInsert: false,
     defaultValue: const Constant('DEBIT'),
   );
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -232,7 +235,10 @@ class $TransactionsTable extends Transactions
     upiApp,
     upiAppName,
     category,
+<<<<<<< HEAD
     direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     createdAt,
     updatedAt,
   ];
@@ -374,12 +380,15 @@ class $TransactionsTable extends Transactions
         category.isAcceptableOrUnknown(data['category']!, _categoryMeta),
       );
     }
+<<<<<<< HEAD
     if (data.containsKey('direction')) {
       context.handle(
         _directionMeta,
         direction.isAcceptableOrUnknown(data['direction']!, _directionMeta),
       );
     }
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -465,10 +474,13 @@ class $TransactionsTable extends Transactions
         DriftSqlType.string,
         data['${effectivePrefix}category'],
       )!,
+<<<<<<< HEAD
       direction: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}direction'],
       )!,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -503,7 +515,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
   final String? upiApp;
   final String? upiAppName;
   final String category;
+<<<<<<< HEAD
   final String direction;
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   final DateTime createdAt;
   final DateTime updatedAt;
   const Transaction({
@@ -523,7 +538,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     this.upiApp,
     this.upiAppName,
     required this.category,
+<<<<<<< HEAD
     required this.direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     required this.createdAt,
     required this.updatedAt,
   });
@@ -560,7 +578,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       map['upi_app_name'] = Variable<String>(upiAppName);
     }
     map['category'] = Variable<String>(category);
+<<<<<<< HEAD
     map['direction'] = Variable<String>(direction);
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -598,7 +619,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ? const Value.absent()
           : Value(upiAppName),
       category: Value(category),
+<<<<<<< HEAD
       direction: Value(direction),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -626,7 +650,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       upiApp: serializer.fromJson<String?>(json['upiApp']),
       upiAppName: serializer.fromJson<String?>(json['upiAppName']),
       category: serializer.fromJson<String>(json['category']),
+<<<<<<< HEAD
       direction: serializer.fromJson<String>(json['direction']),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -651,7 +678,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       'upiApp': serializer.toJson<String?>(upiApp),
       'upiAppName': serializer.toJson<String?>(upiAppName),
       'category': serializer.toJson<String>(category),
+<<<<<<< HEAD
       'direction': serializer.toJson<String>(direction),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -674,7 +704,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     Value<String?> upiApp = const Value.absent(),
     Value<String?> upiAppName = const Value.absent(),
     String? category,
+<<<<<<< HEAD
     String? direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Transaction(
@@ -698,7 +731,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     upiApp: upiApp.present ? upiApp.value : this.upiApp,
     upiAppName: upiAppName.present ? upiAppName.value : this.upiAppName,
     category: category ?? this.category,
+<<<<<<< HEAD
     direction: direction ?? this.direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -734,7 +770,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ? data.upiAppName.value
           : this.upiAppName,
       category: data.category.present ? data.category.value : this.category,
+<<<<<<< HEAD
       direction: data.direction.present ? data.direction.value : this.direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -759,7 +798,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ..write('upiApp: $upiApp, ')
           ..write('upiAppName: $upiAppName, ')
           ..write('category: $category, ')
+<<<<<<< HEAD
           ..write('direction: $direction, ')
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -784,7 +826,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     upiApp,
     upiAppName,
     category,
+<<<<<<< HEAD
     direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     createdAt,
     updatedAt,
   );
@@ -808,7 +853,10 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           other.upiApp == this.upiApp &&
           other.upiAppName == this.upiAppName &&
           other.category == this.category &&
+<<<<<<< HEAD
           other.direction == this.direction &&
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -830,7 +878,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
   final Value<String?> upiApp;
   final Value<String?> upiAppName;
   final Value<String> category;
+<<<<<<< HEAD
   final Value<String> direction;
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -851,7 +902,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.upiApp = const Value.absent(),
     this.upiAppName = const Value.absent(),
     this.category = const Value.absent(),
+<<<<<<< HEAD
     this.direction = const Value.absent(),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -873,7 +927,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.upiApp = const Value.absent(),
     this.upiAppName = const Value.absent(),
     this.category = const Value.absent(),
+<<<<<<< HEAD
     this.direction = const Value.absent(),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -900,7 +957,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     Expression<String>? upiApp,
     Expression<String>? upiAppName,
     Expression<String>? category,
+<<<<<<< HEAD
     Expression<String>? direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -922,7 +982,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       if (upiApp != null) 'upi_app': upiApp,
       if (upiAppName != null) 'upi_app_name': upiAppName,
       if (category != null) 'category': category,
+<<<<<<< HEAD
       if (direction != null) 'direction': direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -946,7 +1009,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     Value<String?>? upiApp,
     Value<String?>? upiAppName,
     Value<String>? category,
+<<<<<<< HEAD
     Value<String>? direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<int>? rowid,
@@ -968,7 +1034,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       upiApp: upiApp ?? this.upiApp,
       upiAppName: upiAppName ?? this.upiAppName,
       category: category ?? this.category,
+<<<<<<< HEAD
       direction: direction ?? this.direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -1026,9 +1095,12 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     if (category.present) {
       map['category'] = Variable<String>(category.value);
     }
+<<<<<<< HEAD
     if (direction.present) {
       map['direction'] = Variable<String>(direction.value);
     }
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -1060,7 +1132,10 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
           ..write('upiApp: $upiApp, ')
           ..write('upiAppName: $upiAppName, ')
           ..write('category: $category, ')
+<<<<<<< HEAD
           ..write('direction: $direction, ')
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -1929,7 +2004,10 @@ typedef $$TransactionsTableCreateCompanionBuilder =
       Value<String?> upiApp,
       Value<String?> upiAppName,
       Value<String> category,
+<<<<<<< HEAD
       Value<String> direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<int> rowid,
@@ -1952,7 +2030,10 @@ typedef $$TransactionsTableUpdateCompanionBuilder =
       Value<String?> upiApp,
       Value<String?> upiAppName,
       Value<String> category,
+<<<<<<< HEAD
       Value<String> direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<int> rowid,
@@ -2047,11 +2128,14 @@ class $$TransactionsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+<<<<<<< HEAD
   ColumnFilters<String> get direction => $composableBuilder(
     column: $table.direction,
     builder: (column) => ColumnFilters(column),
   );
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
@@ -2152,11 +2236,14 @@ class $$TransactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+<<<<<<< HEAD
   ColumnOrderings<String> get direction => $composableBuilder(
     column: $table.direction,
     builder: (column) => ColumnOrderings(column),
   );
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2239,9 +2326,12 @@ class $$TransactionsTableAnnotationComposer
   GeneratedColumn<String> get category =>
       $composableBuilder(column: $table.category, builder: (column) => column);
 
+<<<<<<< HEAD
   GeneratedColumn<String> get direction =>
       $composableBuilder(column: $table.direction, builder: (column) => column);
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -2296,7 +2386,10 @@ class $$TransactionsTableTableManager
                 Value<String?> upiApp = const Value.absent(),
                 Value<String?> upiAppName = const Value.absent(),
                 Value<String> category = const Value.absent(),
+<<<<<<< HEAD
                 Value<String> direction = const Value.absent(),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -2317,7 +2410,10 @@ class $$TransactionsTableTableManager
                 upiApp: upiApp,
                 upiAppName: upiAppName,
                 category: category,
+<<<<<<< HEAD
                 direction: direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -2340,7 +2436,10 @@ class $$TransactionsTableTableManager
                 Value<String?> upiApp = const Value.absent(),
                 Value<String?> upiAppName = const Value.absent(),
                 Value<String> category = const Value.absent(),
+<<<<<<< HEAD
                 Value<String> direction = const Value.absent(),
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -2361,7 +2460,10 @@ class $$TransactionsTableTableManager
                 upiApp: upiApp,
                 upiAppName: upiAppName,
                 category: category,
+<<<<<<< HEAD
                 direction: direction,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

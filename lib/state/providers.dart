@@ -11,7 +11,10 @@ import '../core/utils/category_engine.dart';
 import '../core/utils/recurring_detector.dart';
 import '../services/upi_service.dart';
 import '../services/notification_service.dart';
+<<<<<<< HEAD
 import '../services/sms_sync_service.dart';
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 
 // ═══════════════════════════════════════════
 //  DATABASE PROVIDER (singleton)
@@ -84,18 +87,25 @@ final recentTransactionsProvider = StreamProvider<List<Transaction>>((ref) {
   return db.watchRecentTransactions(limit: 10);
 });
 
+<<<<<<< HEAD
 /// Monthly spending (DEBIT only)
+=======
+/// Monthly spending
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 final monthlySpendingProvider = FutureProvider.family<double, DateTime>((ref, date) {
   final db = ref.watch(databaseProvider);
   return db.getMonthlySpent(date.year, date.month);
 });
 
+<<<<<<< HEAD
 /// Monthly received (CREDIT only)
 final monthlyReceivedProvider = FutureProvider.family<double, DateTime>((ref, date) {
   final db = ref.watch(databaseProvider);
   return db.getMonthlyReceived(date.year, date.month);
 });
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 /// Category spending for a month
 final categorySpendingProvider =
     FutureProvider.family<Map<String, double>, DateTime>((ref, date) {
@@ -112,6 +122,7 @@ final transactionSearchProvider =
 });
 
 // ═══════════════════════════════════════════
+<<<<<<< HEAD
 //  SMS SYNC PROVIDER
 // ═══════════════════════════════════════════
 
@@ -123,6 +134,8 @@ final smsSyncProvider = FutureProvider.autoDispose<int>((ref) async {
 });
 
 // ═══════════════════════════════════════════
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 //  PAYEE PROVIDERS
 // ═══════════════════════════════════════════
 

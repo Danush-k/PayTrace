@@ -2,7 +2,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+<<<<<<< HEAD
 /// A parsed bank SMS indicating a UPI transaction (debit or credit).
+=======
+/// A parsed bank SMS indicating a UPI debit.
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 class BankSms {
   final String sender;
   final String body;
@@ -10,8 +14,11 @@ class BankSms {
   final double? amount;
   final String? refNumber; // UPI ref if found
   final String? accountHint; // Last 4 digits of account
+<<<<<<< HEAD
   final bool isCredit; // true = money received, false = money sent
   final String? payeeName; // Extracted payee/payer name from SMS
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 
   const BankSms({
     required this.sender,
@@ -20,13 +27,20 @@ class BankSms {
     this.amount,
     this.refNumber,
     this.accountHint,
+<<<<<<< HEAD
     this.isCredit = false,
     this.payeeName,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   });
 
   @override
   String toString() =>
+<<<<<<< HEAD
       'BankSms(sender: $sender, amount: $amount, ref: $refNumber, credit: $isCredit, payee: $payeeName)';
+=======
+      'BankSms(sender: $sender, amount: $amount, ref: $refNumber)';
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 }
 
 /// Listens to incoming bank SMS via BroadcastReceiver EventChannel,
@@ -203,6 +217,7 @@ class SmsService {
         lower.contains('imps') ||
         lower.contains('neft');
 
+<<<<<<< HEAD
     // Must NOT be a credit SMS
     final isCredit = isCreditSms(sms);
 
@@ -271,6 +286,9 @@ class SmsService {
       }
     }
     return null;
+=======
+    return hasAmount && (hasDebit || hasUpi);
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
   }
 
   /// Parse raw SMS data into a BankSms object.
@@ -287,6 +305,7 @@ class SmsService {
     final amount = _extractAmount(body);
     final refNumber = _extractUpiRef(body);
     final accountHint = _extractAccountHint(body);
+<<<<<<< HEAD
     final payeeName = extractPayeeName(body);
 
     // Determine if credit
@@ -304,6 +323,12 @@ class SmsService {
       'PayTrace: Parsed SMS → sender=$sender, '
       'amount=$amount, ref=$refNumber, acct=$accountHint, '
       'credit=$isCredit, payee=$payeeName',
+=======
+
+    debugPrint(
+      'PayTrace: Parsed SMS → sender=$sender, '
+      'amount=$amount, ref=$refNumber, acct=$accountHint',
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     );
 
     return BankSms(
@@ -313,8 +338,11 @@ class SmsService {
       amount: amount,
       refNumber: refNumber,
       accountHint: accountHint,
+<<<<<<< HEAD
       isCredit: isCredit,
       payeeName: payeeName,
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     );
   }
 

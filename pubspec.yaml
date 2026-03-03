@@ -46,7 +46,10 @@ dependencies:
   share_plus: ^10.1.4
   csv: ^6.0.0
   permission_handler: ^11.3.1
+<<<<<<< HEAD
   flutter_contacts: ^1.1.9+2
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 
 dev_dependencies:
   flutter_test:

@@ -104,12 +104,19 @@ class TransactionTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
+<<<<<<< HEAD
                   '${transaction.direction == 'CREDIT' ? '+ ' : '- '}${Formatters.currency(transaction.amount)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: transaction.direction == 'CREDIT'
                             ? AppTheme.success
                             : (isSuccess ? null : statusColor),
+=======
+                  '- ${Formatters.currency(transaction.amount)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: isSuccess ? null : statusColor,
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                       ),
                 ),
                 const SizedBox(height: 4),
@@ -150,8 +157,11 @@ class TransactionTile extends StatelessWidget {
         return Icons.contacts_rounded;
       case AppConstants.modeManual:
         return Icons.edit_rounded;
+<<<<<<< HEAD
       case 'SMS_IMPORT':
         return Icons.sms_rounded;
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       default:
         return Icons.payment_rounded;
     }
@@ -167,8 +177,11 @@ class TransactionTile extends StatelessWidget {
         return 'Contact';
       case AppConstants.modeManual:
         return 'Manual';
+<<<<<<< HEAD
       case 'SMS_IMPORT':
         return transaction.direction == 'CREDIT' ? 'Received' : 'SMS';
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
       default:
         return 'Payment';
     }

@@ -35,9 +35,12 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+<<<<<<< HEAD
     // Trigger SMS sync on home screen load
     ref.watch(smsSyncProvider);
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     return Scaffold(
       body: SafeArea(
         child: CustomScrollView(
@@ -221,11 +224,17 @@ class HomeScreen extends ConsumerWidget {
   Widget _buildMonthlySummary(BuildContext context, WidgetRef ref) {
     final now = DateTime.now();
     final monthlySpending = ref.watch(monthlySpendingProvider(now));
+<<<<<<< HEAD
     final monthlyReceived = ref.watch(monthlyReceivedProvider(now));
     final categorySpending = ref.watch(categorySpendingProvider(now));
     final budgetProgress = ref.watch(budgetProgressProvider(now));
     final budgetAsync = ref.watch(monthlyBudgetProvider(now));
     final smsSync = ref.watch(smsSyncProvider);
+=======
+    final categorySpending = ref.watch(categorySpendingProvider(now));
+    final budgetProgress = ref.watch(budgetProgressProvider(now));
+    final budgetAsync = ref.watch(monthlyBudgetProvider(now));
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -264,7 +273,11 @@ class HomeScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
+<<<<<<< HEAD
                   'Sent ',
+=======
+                  'Spent ',
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 monthlySpending.when(
@@ -275,7 +288,11 @@ class HomeScreen extends ConsumerWidget {
                         .headlineMedium
                         ?.copyWith(
                           fontWeight: FontWeight.w800,
+<<<<<<< HEAD
                           color: AppTheme.error,
+=======
+                          color: AppTheme.primary,
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
                         ),
                   ),
                   loading: () => const SizedBox(
@@ -291,6 +308,7 @@ class HomeScreen extends ConsumerWidget {
               ],
             ),
 
+<<<<<<< HEAD
             const SizedBox(height: 4),
 
             // Total received
@@ -374,6 +392,8 @@ class HomeScreen extends ConsumerWidget {
               error: (_, __) => const SizedBox.shrink(),
             ),
 
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
             // ─── Budget Progress Bar ───
             budgetProgress.when(
               data: (progress) {

@@ -6,8 +6,11 @@
     <!-- SMS permissions for auto-detecting bank debit SMS -->
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <uses-permission android:name="android.permission.READ_SMS"/>
+<<<<<<< HEAD
     <!-- Contacts permission for matching UPI phone numbers to contact names -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
+=======
+>>>>>>> b320780f40711318dbd695d92961461caf4e7088
     
     <application
         android:label="PayTrace"
