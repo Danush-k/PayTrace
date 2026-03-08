@@ -4,36 +4,44 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'core/theme/app_theme.dart';
 import 'app/app_shell.dart';
+import 'features/onboarding/onboarding_screen.dart';
+import 'features/onboarding/scanning_screen.dart';
 import 'state/providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Pre-load saved theme to prevent flash on launch
+  // Pre-load both theme and onboarding state simultaneously.
   ThemeMode initialTheme = ThemeMode.dark;
+  bool onboardingDone = false;
+
   try {
     const storage = FlutterSecureStorage();
-    final saved = await storage.read(key: 'theme_mode');
-    if (saved == 'light') {
+    final themeResult = await storage.read(key: 'theme_mode');
+    if (themeResult == 'light') {
       initialTheme = ThemeMode.light;
-    } else if (saved == 'system') {
+    } else if (themeResult == 'system') {
       initialTheme = ThemeMode.system;
     }
   } catch (_) {
     // Fall back to dark if secure storage fails
   }
 
+  onboardingDone = await isOnboardingComplete();
+
   runApp(ProviderScope(
     overrides: [
       themeModeProvider
           .overrideWith((_) => ThemeModeNotifier(initialTheme)),
     ],
-    child: const PayTraceApp(),
+    child: PayTraceApp(onboardingComplete: onboardingDone),
   ));
 }
 
 class PayTraceApp extends ConsumerWidget {
-  const PayTraceApp({super.key});
+  const PayTraceApp({super.key, required this.onboardingComplete});
+
+  final bool onboardingComplete;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,7 +53,7 @@ class PayTraceApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
-      home: const AppShell(),
+      home: onboardingComplete ? const AppShell() : const OnboardingScreen(),
     );
   }
 }

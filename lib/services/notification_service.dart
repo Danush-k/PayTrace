@@ -85,7 +85,12 @@ class NotificationService {
   }
 
   /// Parse a raw notification map into a PaymentNotification.
-  /// More permissive — returns any notification with a detectable amount.
+  ///
+  /// When the native (Kotlin) side has already parsed the notification,
+  /// the map will contain `parsed_amount`, `parsed_merchant`, and
+  /// `parsed_type` keys. These are used as the primary source.
+  /// If they are absent (e.g. older native build), Dart-side regexes
+  /// act as a fallback so behaviour remains identical to before.
   static PaymentNotification? _parseNotification(Map<String, String> data) {
     final packageName = data['package'] ?? '';
     final title = data['title'] ?? '';
@@ -100,20 +105,39 @@ class NotificationService {
     final combined = '$title $text';
     final combinedLower = combined.toLowerCase();
 
-    // Try to extract amount from both title and text
-    final amount = _extractAmount(combined);
+    // ── Primary: use fields pre-parsed by native Kotlin layer ──
+    final nativeAmountStr = data['parsed_amount'];
+    final nativeMerchant  = data['parsed_merchant'];
+    final nativeType      = data['parsed_type'];
 
-    // Determine debit vs credit
-    final isDebit = _isDebit(combinedLower);
+    final double? amount;
+    final String? payeeName;
+    final bool isDebit;
 
-    // Try to extract payee name
-    final payeeName = _extractPayeeName(combined, packageName);
+    if (nativeAmountStr != null && nativeAmountStr.isNotEmpty) {
+      // Native parsing succeeded — use its values directly.
+      amount    = double.tryParse(nativeAmountStr);
+      payeeName = (nativeMerchant != null && nativeMerchant.isNotEmpty)
+          ? nativeMerchant
+          : _extractPayeeName(combined, packageName);
+      isDebit   = nativeType != 'income';
 
-    debugPrint(
-      'PayTrace: Parsed notification → pkg=$packageName, '
-      'amount=$amount, payee=$payeeName, isDebit=$isDebit, '
-      'title="$title", text="$text"',
-    );
+      debugPrint(
+        'PayTrace: Notification (native-parsed) → pkg=$packageName, '
+        'amount=$amount, payee=$payeeName, isDebit=$isDebit',
+      );
+    } else {
+      // Fallback: Dart-side regex parsing (identical to original behaviour).
+      amount    = _extractAmount(combined);
+      payeeName = _extractPayeeName(combined, packageName);
+      isDebit   = _isDebit(combinedLower);
+
+      debugPrint(
+        'PayTrace: Notification (dart-parsed) → pkg=$packageName, '
+        'amount=$amount, payee=$payeeName, isDebit=$isDebit, '
+        'title="$title", text="$text"',
+      );
+    }
 
     // Return even if amount is null — let the matcher decide
     return PaymentNotification(

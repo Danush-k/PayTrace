@@ -5,11 +5,12 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- READ_SMS for polling bank transaction SMS via ContentResolver -->
     <uses-permission android:name="android.permission.READ_SMS"/>
-<<<<<<< HEAD
     <!-- Contacts permission for matching UPI phone numbers to contact names -->
     <uses-permission android:name="android.permission.READ_CONTACTS"/>
-=======
->>>>>>> b320780f40711318dbd695d92961461caf4e7088
+    <!-- Notification permission (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Allow WorkManager to reschedule work after reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     
     <application
         android:label="PayTrace"

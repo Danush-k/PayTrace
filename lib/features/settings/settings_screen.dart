@@ -1,129 +1,47 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
-import '../../core/utils/budget_recommender.dart';
-import '../../data/database/app_database.dart';
 import '../../services/export_service.dart';
-import '../../services/upi_service.dart';
 import '../../state/providers.dart';
 
-// ─── Budget Recommendation Provider ───
-final budgetRecommendationProvider =
-    FutureProvider.autoDispose<BudgetRecommendation>((ref) async {
-  final db = ref.watch(databaseProvider);
-  final now = DateTime.now();
-
-  // Get last 3 months of spending + income data
-  final months = [
-    for (int i = 1; i <= 3; i++) DateTime(now.year, now.month - i),
-  ];
-
-  final spending = await db.getMonthlySpendingHistory(months);
-  final income = await db.getMonthlyIncomeHistory(months);
-
-  // Filter out zero months
-  final nonZeroSpending = spending.where((s) => s > 0).toList();
-  final nonZeroIncome = income.where((i) => i > 0).toList();
-
-  return BudgetRecommender.recommend(
-    monthlySpending: nonZeroSpending,
-    monthlyIncome: nonZeroIncome,
-  );
-});
-
-/// Settings screen — theme, budget, export, about
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final themeMode = ref.watch(themeModeProvider);
     final now = DateTime.now();
-    final monthKey = DateTime(now.year, now.month);
-    final budgetAsync = ref.watch(monthlyBudgetProvider(monthKey));
+    final themeMode = ref.watch(themeModeProvider);
+    final budgetAsync = ref.watch(monthlyBudgetProvider(DateTime(now.year, now.month)));
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          // ─── Appearance Section ───
-          const _SectionHeader(title: 'Appearance'),
-          _buildThemeSelector(context, ref, themeMode),
-
-          const SizedBox(height: 8),
-
-          // ─── Budget Section ───
-          const _SectionHeader(title: 'Budget'),
-          _buildBudgetTile(context, ref, budgetAsync, now),
-
-          const SizedBox(height: 8),
-
-          // ─── Data Section ───
-          const _SectionHeader(title: 'Data'),
-          _buildExportTile(context, ref),
-
-          const SizedBox(height: 8),
-
-          // ─── Permissions Section (Android only) ───
-          if (!kIsWeb) ..._buildPermissionsSection(context, ref),
-
-          const SizedBox(height: 8),
-
-          // ─── About Section ───
-          const _SectionHeader(title: 'About'),
-          const _SettingsTile(
-            icon: Icons.info_outline_rounded,
-            title: 'PayTrace',
-            subtitle: 'Version ${AppConstants.appVersion}',
-            trailing: SizedBox.shrink(),
-          ),
-          const _SettingsTile(
-            icon: Icons.favorite_outline_rounded,
-            title: 'Made with Flutter',
-            subtitle: 'UPI Payment Tracker',
-            trailing: SizedBox.shrink(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildThemeSelector(
-      BuildContext context, WidgetRef ref, ThemeMode current) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Theme.of(context).colorScheme.outline),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 120),
+      children: [
+        Text(
+          'Settings',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.palette_outlined,
-                  color: AppTheme.primary, size: 20),
-                const SizedBox(width: 12),
-                Text(
-                  'Theme',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<ThemeMode>(
+        Text(
+          'Customize your workspace',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        _Card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Theme',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<ThemeMode>(
                 showSelectedIcon: false,
                 segments: const [
                   ButtonSegment(
@@ -132,504 +50,164 @@ class SettingsScreen extends ConsumerWidget {
                     label: Text('System'),
                   ),
                   ButtonSegment(
-                    value: ThemeMode.light,
-                    icon: Icon(Icons.light_mode_rounded, size: 16),
-                    label: Text('Light'),
-                  ),
-                  ButtonSegment(
                     value: ThemeMode.dark,
                     icon: Icon(Icons.dark_mode_rounded, size: 16),
                     label: Text('Dark'),
                   ),
+                  ButtonSegment(
+                    value: ThemeMode.light,
+                    icon: Icon(Icons.light_mode_rounded, size: 16),
+                    label: Text('Light'),
+                  ),
                 ],
-                selected: {current},
-                onSelectionChanged: (modes) {
-                  ref.read(themeModeProvider.notifier).setThemeMode(modes.first);
+                selected: {themeMode},
+                onSelectionChanged: (selection) {
+                  ref.read(themeModeProvider.notifier).setThemeMode(selection.first);
                 },
-                style: ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 12),
-                  ),
-                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildBudgetTile(BuildContext context, WidgetRef ref,
-      AsyncValue<Budget?> budgetAsync, DateTime now) {
-    return budgetAsync.when(
-      data: (budget) {
-        final hasLimit = budget != null && budget.limitAmount > 0;
-        return _SettingsTile(
-          icon: Icons.account_balance_wallet_outlined,
-          title: 'Monthly Budget',
-          subtitle: hasLimit
-              ? '${Formatters.currency(budget.limitAmount)} for ${Formatters.monthYear(now)}'
-              : 'No budget set for ${Formatters.monthYear(now)}',
-          trailing: Icon(Icons.chevron_right_rounded,
-              color: Theme.of(context).textTheme.bodyMedium?.color),
-          onTap: () => _showBudgetSheet(context, ref, budget, now),
-        );
-      },
-      loading: () => const _SettingsTile(
-        icon: Icons.account_balance_wallet_outlined,
-        title: 'Monthly Budget',
-        subtitle: 'Loading...',
-        trailing: SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(strokeWidth: 2),
+        const SizedBox(height: 12),
+        _Card(
+          child: budgetAsync.when(
+            data: (budget) {
+              final title = budget == null
+                  ? 'No monthly budget set'
+                  : 'Budget ${Formatters.currency(budget.limitAmount)}';
+              return _Tile(
+                icon: Icons.account_balance_wallet_outlined,
+                title: title,
+                subtitle: Formatters.monthYear(now),
+                trailing: const Icon(Icons.chevron_right_rounded),
+              );
+            },
+            loading: () => const _Tile(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Loading budget...',
+              subtitle: '',
+              trailing: SizedBox.shrink(),
+            ),
+            error: (_, __) => const _Tile(
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Budget unavailable',
+              subtitle: '',
+              trailing: SizedBox.shrink(),
+            ),
+          ),
         ),
-      ),
-      error: (_, _) => const _SettingsTile(
-        icon: Icons.account_balance_wallet_outlined,
-        title: 'Monthly Budget',
-        subtitle: 'Error loading budget',
-        trailing: SizedBox.shrink(),
-      ),
-    );
-  }
-
-  List<Widget> _buildPermissionsSection(BuildContext context, WidgetRef ref) {
-    return [
-      _SectionHeader(title: 'Permissions'),
-      _SettingsTile(
-        icon: Icons.sms_outlined,
-        title: 'SMS Access',
-        subtitle: 'Required for auto-detecting bank transactions',
-        trailing: Icon(Icons.chevron_right_rounded,
-            color: Theme.of(context).textTheme.bodyMedium?.color),
-        onTap: () async {
-          await UpiService.openAppSettings();
-        },
-      ),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: Text(
-          'If SMS permission is not working, open PayTrace in phone Settings, '
-          'tap ⋮ (3 dots) at top right, and enable "Allow restricted settings".',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontSize: 11,
-                color: Colors.grey.shade500,
-              ),
-        ),
-      ),
-    ];
-  }
-
-  Widget _buildExportTile(BuildContext context, WidgetRef ref) {
-    return _SettingsTile(
-      icon: Icons.file_download_outlined,
-      title: 'Export Transactions',
-      subtitle: 'Download as CSV file',
-      trailing: Icon(Icons.chevron_right_rounded,
-          color: Theme.of(context).textTheme.bodyMedium?.color),
-      onTap: () => _showExportSheet(context, ref),
-    );
-  }
-
-  void _showBudgetSheet(
-      BuildContext context, WidgetRef ref, Budget? existing, DateTime now) {
-    final controller = TextEditingController(
-      text: existing != null ? existing.limitAmount.toStringAsFixed(0) : '',
-    );
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => Consumer(
-        builder: (ctx, ref, _) {
-          final recommendationAsync = ref.watch(budgetRecommendationProvider);
-
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 24,
-              right: 24,
-              top: 24,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Set Monthly Budget',
-                  style: Theme.of(ctx).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  Formatters.monthYear(now),
-                  style: Theme.of(ctx).textTheme.bodyMedium,
-                ),
-
-                // ── Smart Suggestions ──
-                const SizedBox(height: 16),
-                recommendationAsync.when(
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, _) => const SizedBox.shrink(),
-                  data: (rec) {
-                    if (!rec.hasTiers) return const SizedBox.shrink();
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.auto_awesome,
-                                size: 16, color: AppTheme.primary),
-                            const SizedBox(width: 6),
-                            Text(
-                              'SMART SUGGESTIONS',
-                              style: Theme.of(ctx)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color: AppTheme.primary,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.8,
-                                  ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          rec.reasoning,
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                color: Theme.of(ctx).brightness ==
-                                        Brightness.dark
-                                    ? AppTheme.textSecondaryDark
-                                    : AppTheme.textSecondaryLight,
-                                fontSize: 11,
-                              ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: rec.tiers
-                              .map((tier) => Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 3),
-                                      child: _BudgetTierChip(
-                                        tier: tier,
-                                        onTap: () => controller.text =
-                                            tier.amount.toStringAsFixed(0),
-                                      ),
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                    );
-                  },
-                ),
-
-                TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.number,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Budget Amount',
-                    prefixText: '₹ ',
-                    hintText: 'e.g. 5000',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Quick amount chips
-                Wrap(
-                  spacing: 8,
-                  children: [2000, 5000, 10000, 20000, 50000].map((amount) {
-                    return ActionChip(
-                      label: Text(
-                          '₹${Formatters.amountOnly(amount.toDouble()).split('.')[0]}'),
-                      onPressed: () => controller.text = amount.toString(),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      final amount = double.tryParse(controller.text);
-                      if (amount != null && amount > 0) {
-                        ref.read(databaseProvider).upsertBudget(
-                              now.year, now.month, amount);
-                        ref.invalidate(monthlyBudgetProvider);
-                        ref.invalidate(budgetProgressProvider);
-                        Navigator.of(ctx).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Budget set to ${Formatters.currency(amount)}',
-                            ),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
-                      }
-                    },
-                    child: const Text('Save Budget'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (existing != null)
-                  SizedBox(
-                    width: double.infinity,
-                    child: TextButton(
-                      onPressed: () {
-                        ref.read(databaseProvider).upsertBudget(
-                              now.year, now.month, 0);
-                        ref.invalidate(monthlyBudgetProvider);
-                        ref.invalidate(budgetProgressProvider);
-                        Navigator.of(ctx).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Budget removed')),
-                        );
-                      },
-                      style:
-                          TextButton.styleFrom(foregroundColor: AppTheme.error),
-                      child: const Text('Remove Budget'),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showExportSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Export Transactions',
-              style: Theme.of(ctx).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Share your transaction history as a CSV file',
-              style: Theme.of(ctx).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-            // Export all
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  Navigator.of(ctx).pop();
+        const SizedBox(height: 12),
+        _Card(
+          child: Column(
+            children: [
+              _Tile(
+                icon: Icons.file_download_outlined,
+                title: 'Export transactions',
+                subtitle: 'Generate CSV',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
                   final db = ref.read(databaseProvider);
                   final transactions = await db.getAllTransactions();
-                  if (transactions.isEmpty) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No transactions to export'),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  try {
-                    await ExportService.exportToCsv(transactions);
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Export failed: $e')),
-                      );
-                    }
-                  }
+                  await ExportService.exportToCsv(transactions);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Transactions exported successfully'),
+                      behavior: SnackBarBehavior.floating,
+                      backgroundColor: AppTheme.success,
+                    ),
+                  );
                 },
-                icon: const Icon(Icons.download_rounded, size: 20),
-                label: const Text('Export All Transactions'),
               ),
-            ),
-            const SizedBox(height: 12),
-            // Export this month
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  Navigator.of(ctx).pop();
-                  final db = ref.read(databaseProvider);
-                  final now = DateTime.now();
-                  final start = DateTime(now.year, now.month, 1);
-                  final end = DateTime(now.year, now.month + 1, 0, 23, 59, 59);
-                  final transactions =
-                      await db.getTransactionsInRange(start, end);
-                  if (transactions.isEmpty) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No transactions this month'),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  try {
-                    await ExportService.exportToCsv(transactions);
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Export failed: $e')),
-                      );
-                    }
-                  }
-                },
-                icon: const Icon(Icons.calendar_month_rounded, size: 20),
-                label: const Text('Export This Month'),
+              Divider(
+                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                height: 1,
               ),
-            ),
-            const SizedBox(height: 16),
-          ],
+              const _Tile(
+                icon: Icons.info_outline_rounded,
+                title: 'PayTrace',
+                subtitle: 'Version ${AppConstants.appVersion}',
+                trailing: SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }
 
-// ─── Reusable Widgets ───
+class _Card extends StatelessWidget {
+  final Widget child;
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  const _SectionHeader({required this.title});
+  const _Card({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-      child: Text(
-        title.toUpperCase(),
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              fontSize: 11,
-              letterSpacing: 1.2,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
       ),
+      padding: const EdgeInsets.all(14),
+      child: child,
     );
   }
 }
 
-class _SettingsTile extends StatelessWidget {
+class _Tile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final Widget? trailing;
+  final Widget trailing;
   final VoidCallback? onTap;
 
-  const _SettingsTile({
+  const _Tile({
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.trailing,
+    required this.trailing,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      child: ListTile(
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, color: AppTheme.primary, size: 20),
-        ),
-        title: Text(title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontSize: 15,
-                )),
-        subtitle: Text(subtitle,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontSize: 12,
-                )),
-        trailing: trailing,
-        onTap: onTap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-  }
-}
-// ═══════════════════════════════════════════
-//  BUDGET TIER CHIP
-// ═══════════════════════════════════════════
-
-class _BudgetTierChip extends StatelessWidget {
-  final BudgetTier tier;
-  final VoidCallback onTap;
-
-  const _BudgetTierChip({required this.tier, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final tierColor = Color(tier.color);
-
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        decoration: BoxDecoration(
-          color: tierColor.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: tierColor.withValues(alpha: 0.3),
-          ),
-        ),
-        child: Column(
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+        child: Row(
           children: [
-            Text(
-              tier.icon,
-              style: const TextStyle(fontSize: 20),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              tier.label,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                color: tierColor,
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(10),
               ),
-              textAlign: TextAlign.center,
+              child: Icon(icon, size: 19, color: AppTheme.primary),
             ),
-            const SizedBox(height: 2),
-            Text(
-              '₹${tier.amount.toStringAsFixed(0)}',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  if (subtitle.isNotEmpty)
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
               ),
             ),
-            Text(
-              tier.savingsPercent > 0
-                  ? 'Save ${tier.savingsPercent}%'
-                  : tier.savingsPercent < 0
-                      ? '+${tier.savingsPercent.abs()}% buffer'
-                      : 'Match avg',
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontSize: 9,
-                color: isDark
-                    ? AppTheme.textSecondaryDark
-                    : AppTheme.textSecondaryLight,
-              ),
-              textAlign: TextAlign.center,
-            ),
+            trailing,
           ],
         ),
       ),

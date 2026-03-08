@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../core/utils/sms_transaction_parser.dart';
+
 /// A parsed bank SMS indicating a UPI transaction (debit or credit).
 class BankSms {
   final String sender;
@@ -33,6 +35,26 @@ class BankSms {
 /// parses them for UPI debit details, and provides matching.
 class SmsService {
   SmsService._();
+
+  /// Known financial sender IDs. Unknown senders are allowed only when
+  /// strong transaction semantics are present in the message body.
+  static const _financialSenderWhitelist = <String>{
+    'AXISBK',
+    'HDFCBK',
+    'ICICIB',
+    'SBIBNK',
+    'SBIINB',
+    'SBINOB',
+    'PAYTMB',
+    'PHONEPE',
+    'GPAY',
+    'KOTAKB',
+    'PNBSMS',
+    'CANBNK',
+    'BOBSMS',
+    'INDBNK',
+    'IDFCFB',
+  };
 
   static const _channel = MethodChannel('com.paytrace.paytrace/upi');
   static const _eventChannel =
@@ -367,6 +389,9 @@ class SmsService {
   static bool _isLikelyBankSms(String sender, String body) {
     final lower = body.toLowerCase();
     final senderLower = sender.toLowerCase();
+    final normalizedSender = sender
+        .replaceFirst(RegExp(r'^[A-Z]{2}-'), '')
+        .toUpperCase();
 
     // ── Reject known non-financial senders ──
     const nonFinancialSenders = [
@@ -389,6 +414,24 @@ class SmsService {
 
     // ── Reject subscription / plan / recharge notifications ──
     if (_isSubscriptionOrPlanSms(lower)) return false;
+
+    final isWhitelistedSender =
+      _financialSenderWhitelist.contains(normalizedSender) ||
+      _financialSenderWhitelist.any(normalizedSender.contains);
+
+    // Unknown senders are accepted only if they have strong transaction
+    // semantics and financial context.
+    final hasStrongTransactionKeyword = lower.contains('debited') ||
+      lower.contains('credited') ||
+      lower.contains('spent') ||
+      lower.contains('paid') ||
+      lower.contains('sent') ||
+      lower.contains('received') ||
+      lower.contains('transferred') ||
+      lower.contains('deposited') ||
+      lower.contains('withdrawn') ||
+      lower.contains('txn') ||
+      lower.contains('ref no');
 
     // ── Must contain at least one banking / financial keyword ──
     // Real bank SMS always reference accounts, UPI, or use
@@ -413,6 +456,10 @@ class SmsService {
                 lower.contains('credit') ||
                 lower.contains('transfer') ||
                 lower.contains('withdraw')));
+
+    if (!isWhitelistedSender && !hasStrongTransactionKeyword) {
+      return false;
+    }
 
     return hasBankIndicator;
   }
@@ -635,5 +682,50 @@ class SmsService {
     buffer.write(last3);
 
     return buffer.toString();
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  INTELLIGENT PARSER BRIDGE
+  // ═══════════════════════════════════════════════════════════
+
+  /// Parse an SMS using the intelligent [SmsTransactionParser].
+  ///
+  /// Returns a [ParsedTransaction] if the message is a valid
+  /// financial transaction, or `null` if it should be ignored.
+  /// This provides richer output than the legacy [_parseSms]
+  /// method, including category inference and confidence scoring.
+  static ParsedTransaction? parseTransaction({
+    required String body,
+    required String sender,
+    required DateTime timestamp,
+  }) {
+    return SmsTransactionParser.parse(
+      body: body,
+      sender: sender,
+      timestamp: timestamp,
+    );
+  }
+
+  /// Parse a raw platform-channel SMS map using the intelligent parser.
+  static ParsedTransaction? parseTransactionRaw(Map<String, String> data) {
+    return SmsTransactionParser.parseRaw(data);
+  }
+
+  /// Convert a [ParsedTransaction] back to a [BankSms] for backward
+  /// compatibility with existing code that expects [BankSms] objects.
+  static BankSms? parsedToBankSms(ParsedTransaction parsed, {
+    required String sender,
+    required String body,
+  }) {
+    return BankSms(
+      sender: sender,
+      body: body,
+      timestamp: parsed.timestamp,
+      amount: parsed.amount,
+      refNumber: parsed.upiRef,
+      accountHint: parsed.accountHint,
+      isCredit: parsed.isIncome,
+      payeeName: parsed.merchant,
+    );
   }
 }

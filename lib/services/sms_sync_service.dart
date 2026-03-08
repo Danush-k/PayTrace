@@ -1,11 +1,16 @@
+import 'dart:collection';
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/database/app_database.dart';
-import '../core/utils/category_engine.dart';
+import '../core/utils/sms_transaction_parser.dart';
 import 'contact_lookup_service.dart';
+import 'merchant_learning_service.dart';
 import 'sms_service.dart';
 
 /// SMS Sync Service — scans bank SMS on app open and auto-imports
@@ -26,6 +31,8 @@ class SmsSyncService {
 
   static const _storage = FlutterSecureStorage();
   static const _lastSyncKey = 'sms_sync_last_timestamp';
+  static const _processedHashesKey = 'sms_sync_processed_hashes_v1';
+  static const _maxStoredHashes = 4000;
   static const _uuid = Uuid();
 
   /// Run the full sync pipeline. Returns the count of newly imported transactions.
@@ -64,11 +71,30 @@ class SmsSyncService {
 
       debugPrint('PayTrace SMS Sync: ${transactionSms.length} valid UPI transactions');
 
+      // 4b. Hash-based dedup (body + timestamp) to avoid re-importing
+      // the same SMS across sync cycles and within the same scan batch.
+      final processedHashes = await _loadProcessedSmsHashes();
+      var processedHashesDirty = false;
+
       int imported = 0;
 
       for (final sms in transactionSms) {
-        final wasImported = await _importSms(db, sms);
-        if (wasImported) imported++;
+        final smsHash = _smsHash(sms.body, sms.timestamp);
+        if (processedHashes.contains(smsHash)) {
+          continue;
+        }
+
+        // Use the intelligent parser for import; falls back gracefully
+        final wasImported = await _importSmsParsed(db, sms);
+        if (wasImported) {
+          imported++;
+          processedHashes.add(smsHash);
+          processedHashesDirty = true;
+        }
+      }
+
+      if (processedHashesDirty) {
+        await _saveProcessedSmsHashes(processedHashes);
       }
 
       // 5. Save the sync timestamp
@@ -170,6 +196,10 @@ class SmsSyncService {
   }
 
   /// Import a single SMS as a transaction (with multi-layer dedup).
+  /// Legacy import path — kept as fallback for edge cases where the
+  /// intelligent parser may be too aggressive. Called by [_importSmsParsed]
+  /// when needed.
+  // ignore: unused_element
   static Future<bool> _importSms(AppDatabase db, BankSms sms) async {
     try {
       final direction = sms.isCredit ? 'CREDIT' : 'DEBIT';
@@ -218,7 +248,11 @@ class SmsSyncService {
       // ═══ Auto-categorize ═══
       final category = sms.isCredit
           ? 'Income'
-          : CategoryEngine.categorize(payeeName: payeeName, upiId: payeeUpiId);
+          : await MerchantLearningService.categorize(
+              db,
+              payeeName: payeeName,
+              upiId: payeeUpiId,
+            );
 
       // ═══ Insert transaction ═══
       final id = _uuid.v4();
@@ -460,6 +494,133 @@ class SmsSyncService {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════
+  //  INTELLIGENT PARSER IMPORT
+  // ═══════════════════════════════════════════════════════════
+
+  /// Import a single SMS using the intelligent [SmsTransactionParser].
+  ///
+  /// This provides richer categorization and confidence scoring
+  /// compared to the legacy [_importSms] flow. Falls back to
+  /// [_importSms] if the parser rejects the message but legacy
+  /// heuristics accept it (belt-and-suspenders).
+  static Future<bool> _importSmsParsed(AppDatabase db, BankSms sms) async {
+    final parsed = SmsTransactionParser.parse(
+      body: sms.body,
+      sender: sms.sender,
+      timestamp: sms.timestamp,
+    );
+
+    if (parsed == null) {
+      // Parser rejected — skip (don't fall back to legacy to avoid
+      // false positives that the parser was designed to eliminate).
+      debugPrint(
+        'PayTrace SMS Sync: Parser REJECTED SMS from ${sms.sender}',
+      );
+      return false;
+    }
+
+    // Low-confidence results: still import but log for review.
+    if (parsed.confidence < 0.5) {
+      debugPrint(
+        'PayTrace SMS Sync: LOW confidence '
+        '(${(parsed.confidence * 100).toStringAsFixed(0)}%) '
+        'for ₹${parsed.amount} ${parsed.type}',
+      );
+    }
+
+    try {
+      final direction = parsed.isIncome ? 'CREDIT' : 'DEBIT';
+
+      // ═══ Dedup — same 3 layers as legacy ═══
+      if (parsed.upiRef != null && parsed.upiRef!.isNotEmpty) {
+        final existing = await db.findTransactionByRef(parsed.upiRef!);
+        if (existing != null) {
+          debugPrint('PayTrace SMS Sync: SKIP [ref] ref=${parsed.upiRef}');
+          return false;
+        }
+      }
+
+      if (parsed.isExpense) {
+        final isDup = await db.isDuplicateDebit(
+          amount: parsed.amount,
+          timestamp: parsed.timestamp,
+        );
+        if (isDup) {
+          debugPrint(
+            'PayTrace SMS Sync: SKIP [debit-dup] '
+            '₹${parsed.amount} at ${parsed.timestamp}',
+          );
+          return false;
+        }
+      }
+
+      final isSmsReimport = await db.isDuplicateSmsImport(
+        amount: parsed.amount,
+        direction: direction,
+        timestamp: parsed.timestamp,
+      );
+      if (isSmsReimport) {
+        debugPrint(
+          'PayTrace SMS Sync: SKIP [reimport] '
+          '$direction ₹${parsed.amount}',
+        );
+        return false;
+      }
+
+      // ═══ Resolve payee info ═══
+      final payeeUpiId =
+          parsed.upiId ?? _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
+      final payeeName =
+          await _resolvePayeeName(db, sms, payeeUpiId) ;
+
+      // Use the parser's category (it already called CategoryEngine)
+      // but allow _resolvePayeeName to provide a better name.
+      final category = parsed.category == 'Income'
+          ? 'Income'
+          : await MerchantLearningService.categorize(
+              db,
+              payeeName: payeeName,
+              upiId: payeeUpiId,
+            );
+
+      final id = _uuid.v4();
+      final note = _extractTransactionNote(sms);
+
+      await db.insertTransaction(TransactionsCompanion(
+        id: Value(id),
+        payeeUpiId: Value(payeeUpiId),
+        payeeName: Value(payeeName),
+        amount: Value(parsed.amount),
+        transactionRef: Value(
+          parsed.upiRef ??
+              'SMS_${sms.timestamp.millisecondsSinceEpoch}',
+        ),
+        approvalRefNo: Value(parsed.upiRef),
+        status: const Value('SUCCESS'),
+        paymentMode: const Value('SMS_IMPORT'),
+        category: Value(category),
+        direction: Value(direction),
+        transactionNote: Value(note),
+        createdAt: Value(parsed.timestamp),
+        updatedAt: Value(DateTime.now()),
+      ));
+
+      await _upsertPayee(db, payeeUpiId, payeeName, parsed.timestamp);
+
+      debugPrint(
+        'PayTrace SMS Sync: IMPORTED (parser) $direction '
+        '₹${parsed.amount} ${parsed.isIncome ? "from" : "to"} '
+        '$payeeName [${parsed.category}] '
+        'confidence=${(parsed.confidence * 100).toStringAsFixed(0)}%',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('PayTrace SMS Sync: Parser import error — $e');
+      return false;
+    }
+  }
+
   /// Get the last sync timestamp from secure storage.
   static Future<DateTime> _getLastSyncTime() async {
     try {
@@ -469,7 +630,7 @@ class SmsSyncService {
         if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms);
       }
     } catch (_) {}
-    return DateTime.now().subtract(const Duration(days: 30));
+    return DateTime.now().subtract(const Duration(days: 90));
   }
 
   /// Save the last sync timestamp.
@@ -478,5 +639,36 @@ class SmsSyncService {
       key: _lastSyncKey,
       value: time.millisecondsSinceEpoch.toString(),
     );
+  }
+
+  static Future<LinkedHashSet<String>> _loadProcessedSmsHashes() async {
+    try {
+      final raw = await _storage.read(key: _processedHashesKey);
+      if (raw == null || raw.isEmpty) return LinkedHashSet<String>();
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return LinkedHashSet<String>.from(
+          decoded.whereType<String>(),
+        );
+      }
+    } catch (_) {}
+    return LinkedHashSet<String>();
+  }
+
+  static Future<void> _saveProcessedSmsHashes(LinkedHashSet<String> hashes) async {
+    while (hashes.length > _maxStoredHashes) {
+      hashes.remove(hashes.first);
+    }
+
+    await _storage.write(
+      key: _processedHashesKey,
+      value: jsonEncode(hashes.toList(growable: false)),
+    );
+  }
+
+  static String _smsHash(String body, DateTime timestamp) {
+    final payload =
+        '${timestamp.millisecondsSinceEpoch}|${body.trim().toLowerCase()}';
+    return sha1.convert(utf8.encode(payload)).toString();
   }
 }

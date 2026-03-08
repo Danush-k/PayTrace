@@ -1,29 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/theme/app_theme.dart';
+import '../../core/utils/category_engine.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/database/app_database.dart';
-import '../../services/export_service.dart';
 import '../../state/providers.dart';
 import 'transaction_detail_screen.dart';
-import 'widgets/filter_bar.dart';
-import 'widgets/transaction_tile.dart';
 
-/// Full transaction history with search, filter, and export
+enum _HistoryFilter { all, debit, credit }
+
 class HistoryScreen extends ConsumerStatefulWidget {
-  const HistoryScreen({super.key});
+  final DateTime? initialDate;
+
+  const HistoryScreen({super.key, this.initialDate});
 
   @override
   ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
-  String _statusFilter = 'ALL';
-  String _searchQuery = '';
-  String? _categoryFilter;
-  DateTimeRange? _dateRange;
-  RangeValues? _amountRange;
-  final _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+  _HistoryFilter _filter = _HistoryFilter.all;
+  DateTime? _dateFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialDate != null) {
+      final d = widget.initialDate!;
+      _dateFilter = DateTime(d.year, d.month, d.day);
+    }
+  }
 
   @override
   void dispose() {
@@ -31,248 +39,266 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     super.dispose();
   }
 
-  List<Transaction> _applyFilters(List<Transaction> transactions) {
-    var filtered = transactions;
+  @override
+  Widget build(BuildContext context) {
+    final allTxnsAsync = ref.watch(allTransactionsProvider);
 
-    // Status filter
-    if (_statusFilter != 'ALL') {
-      filtered =
-          filtered.where((t) => t.status == _statusFilter).toList();
-    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'History',
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => setState(() => _searchController.clear()),
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Clear search',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _searchController,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  hintText: 'Search transactions',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  _FilterChip(
+                    label: 'All',
+                    selected: _filter == _HistoryFilter.all,
+                    onTap: () => setState(() => _filter = _HistoryFilter.all),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Debit',
+                    selected: _filter == _HistoryFilter.debit,
+                    onTap: () => setState(() => _filter = _HistoryFilter.debit),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Credit',
+                    selected: _filter == _HistoryFilter.credit,
+                    onTap: () => setState(() => _filter = _HistoryFilter.credit),
+                  ),
+                  if (_dateFilter != null) ...[
+                    const SizedBox(width: 8),
+                    _FilterChip(
+                      label: 'Today',
+                      selected: true,
+                      onTap: () => setState(() => _dateFilter = null),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: allTxnsAsync.when(
+            data: (transactions) {
+              final filtered = _applyFilter(transactions);
+              if (filtered.isEmpty) {
+                return const Center(child: Text('No matching transactions'));
+              }
 
-    // Category filter
-    if (_categoryFilter != null) {
-      filtered =
-          filtered.where((t) => t.category == _categoryFilter).toList();
-    }
+              final grouped = _groupByDate(filtered);
+              final keys = grouped.keys.toList()
+                ..sort((a, b) => b.compareTo(a));
 
-    // Date range filter
-    if (_dateRange != null) {
-      filtered = filtered.where((t) {
-        return t.createdAt.isAfter(
-                _dateRange!.start.subtract(const Duration(seconds: 1))) &&
-            t.createdAt.isBefore(
-                _dateRange!.end.add(const Duration(days: 1)));
-      }).toList();
-    }
-
-    // Amount range filter
-    if (_amountRange != null) {
-      filtered = filtered.where((t) {
-        final min = _amountRange!.start;
-        final max = _amountRange!.end;
-        return t.amount >= min &&
-            (max == double.infinity || t.amount <= max);
-      }).toList();
-    }
-
-    // Search filter
-    if (_searchQuery.isNotEmpty) {
-      final q = _searchQuery.toLowerCase();
-      filtered = filtered.where((t) {
-        return t.payeeName.toLowerCase().contains(q) ||
-            t.payeeUpiId.toLowerCase().contains(q) ||
-            (t.transactionNote?.toLowerCase().contains(q) ?? false) ||
-            t.category.toLowerCase().contains(q);
-      }).toList();
-    }
-
-    return filtered;
+              return ListView.builder(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 120),
+                itemCount: keys.length,
+                itemBuilder: (context, index) {
+                  final day = keys[index];
+                  final dayTxns = grouped[day]!;
+                  return _DateGroupSection(day: day, txns: dayTxns);
+                },
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (err, _) => Center(child: Text('Error: $err')),
+          ),
+        ),
+      ],
+    );
   }
 
-  /// Group transactions by date
-  Map<String, List<Transaction>> _groupByDate(List<Transaction> txns) {
-    final grouped = <String, List<Transaction>>{};
+  List<Transaction> _applyFilter(List<Transaction> items) {
+    final query = _searchController.text.trim().toLowerCase();
+
+    return items.where((txn) {
+      if (_filter == _HistoryFilter.debit && txn.direction == 'CREDIT') {
+        return false;
+      }
+      if (_filter == _HistoryFilter.credit && txn.direction != 'CREDIT') {
+        return false;
+      }
+
+      if (query.isEmpty) return true;
+
+      final haystack = [
+        txn.payeeName,
+        txn.payeeUpiId,
+        txn.category,
+        txn.transactionNote ?? '',
+      ].join(' ').toLowerCase();
+
+      return haystack.contains(query);
+    }).where((txn) {
+      if (_dateFilter == null) return true;
+      final day = DateTime(txn.createdAt.year, txn.createdAt.month, txn.createdAt.day);
+      return day == _dateFilter;
+    }).toList();
+  }
+
+  Map<DateTime, List<Transaction>> _groupByDate(List<Transaction> txns) {
+    final grouped = <DateTime, List<Transaction>>{};
     for (final txn in txns) {
-      final key = Formatters.dateRelative(txn.createdAt);
-      grouped.putIfAbsent(key, () => []).add(txn);
+      final day = DateTime(txn.createdAt.year, txn.createdAt.month, txn.createdAt.day);
+      grouped.putIfAbsent(day, () => []).add(txn);
+    }
+    for (final list in grouped.values) {
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     }
     return grouped;
   }
+}
+
+class _DateGroupSection extends StatelessWidget {
+  final DateTime day;
+  final List<Transaction> txns;
+
+  const _DateGroupSection({required this.day, required this.txns});
 
   @override
   Widget build(BuildContext context) {
-    final txnAsync = ref.watch(allTransactionsProvider);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Transactions'),
-        actions: [
-          // Export button
-          txnAsync.whenOrNull(
-                data: (txns) => IconButton(
-                  icon: const Icon(Icons.file_download_outlined),
-                  tooltip: 'Export CSV',
-                  onPressed: txns.isEmpty
-                      ? null
-                      : () async {
-                          try {
-                            final filtered = _applyFilters(txns);
-                            await ExportService.exportToCsv(
-                                filtered.isEmpty ? txns : filtered);
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Export failed: $e')),
-                              );
-                            }
-                          }
-                        },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 12, bottom: 8),
+          child: Text(
+            Formatters.dateRelative(day),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
-              ) ??
-              const SizedBox.shrink(),
-        ],
+          ),
+        ),
+        ...txns.map((txn) => _HistoryTxnTile(txn: txn)),
+      ],
+    );
+  }
+}
+
+class _HistoryTxnTile extends StatelessWidget {
+  final Transaction txn;
+
+  const _HistoryTxnTile({required this.txn});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDebit = txn.direction != 'CREDIT';
+    final amountColor = isDebit ? AppTheme.error : AppTheme.success;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
       ),
-      body: Column(
-        children: [
-          // Search bar
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              decoration: InputDecoration(
-                hintText: 'Search by name, UPI ID, category...',
-                prefixIcon:
-                    const Icon(Icons.search_rounded, size: 20),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-              ),
+      child: ListTile(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => TransactionDetailScreen(transaction: txn),
             ),
+          );
+        },
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        leading: CircleAvatar(
+          backgroundColor: AppTheme.primary.withValues(alpha: 0.14),
+          child: Text(
+            CategoryEngine.categoryIcon(txn.category),
+            style: const TextStyle(fontSize: 15),
           ),
-
-          // Enhanced filter bar
-          FilterBar(
-            selectedStatus: _statusFilter,
-            onStatusChanged: (v) => setState(() => _statusFilter = v),
-            selectedCategory: _categoryFilter,
-            onCategoryChanged: (v) => setState(() => _categoryFilter = v),
-            selectedDateRange: _dateRange,
-            onDateRangeChanged: (v) => setState(() => _dateRange = v),
-            amountRange: _amountRange,
-            onAmountRangeChanged: (v) => setState(() => _amountRange = v),
-          ),
-
-          const SizedBox(height: 8),
-
-          // Transaction list
-          Expanded(
-            child: txnAsync.when(
-              data: (allTxns) {
-                final filtered = _applyFilters(allTxns);
-
-                if (filtered.isEmpty) {
-                  return _buildEmptyState();
-                }
-
-                final grouped = _groupByDate(filtered);
-
-                return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 80),
-                  itemCount: grouped.length,
-                  itemBuilder: (context, index) {
-                    final dateLabel = grouped.keys.elementAt(index);
-                    final dateTxns = grouped[dateLabel]!;
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                              20, 16, 20, 8),
-                          child: Text(
-                            dateLabel,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                ),
-                          ),
-                        ),
-                        ...dateTxns.map((txn) => TransactionTile(
-                              transaction: txn,
-                              onTap: () => _openDetail(txn),
-                            )),
-                      ],
-                    );
-                  },
-                );
-              },
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Text('Error: $e'),
+        ),
+        title: Text(
+          txn.payeeName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
               ),
-            ),
-          ),
-        ],
+        ),
+        subtitle: Text(
+          '${txn.category} · ${Formatters.timeOnly(txn.createdAt)}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Text(
+          '${isDebit ? '-' : '+'}${Formatters.currency(txn.amount)}',
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: amountColor,
+                fontWeight: FontWeight.w700,
+              ),
+        ),
       ),
     );
   }
+}
 
-  Widget _buildEmptyState() {
-    final hasFilters = _searchQuery.isNotEmpty ||
-        _statusFilter != 'ALL' ||
-        _categoryFilter != null ||
-        _dateRange != null ||
-        _amountRange != null;
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.receipt_long_rounded,
-              size: 64, color: Colors.grey.shade600),
-          const SizedBox(height: 16),
-          Text(
-            hasFilters
-                ? 'No matching transactions'
-                : 'No transactions yet',
-            style: Theme.of(context).textTheme.titleMedium,
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primary.withValues(alpha: 0.2)
+              : Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? AppTheme.primary
+                : Theme.of(context).colorScheme.outline.withValues(alpha: 0.25),
           ),
-          const SizedBox(height: 4),
-          Text(
-            hasFilters
-                ? 'Try adjusting your filters'
-                : 'Your payments will appear here',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (hasFilters) ...[
-            const SizedBox(height: 16),
-            TextButton.icon(
-              onPressed: () => setState(() {
-                _searchQuery = '';
-                _searchController.clear();
-                _statusFilter = 'ALL';
-                _categoryFilter = null;
-                _dateRange = null;
-                _amountRange = null;
-              }),
-              icon: const Icon(Icons.filter_alt_off_rounded, size: 18),
-              label: const Text('Clear all filters'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  void _openDetail(Transaction txn) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TransactionDetailScreen(transaction: txn),
+        ),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: selected ? AppTheme.primary : null,
+              ),
+        ),
       ),
     );
   }

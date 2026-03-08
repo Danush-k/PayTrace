@@ -104,12 +104,12 @@ class TransactionTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${transaction.direction == 'CREDIT' ? '+ ' : '- '}${Formatters.currency(transaction.amount)}',
+                  '${transaction.direction == 'CREDIT' ? '+' : '-'}${Formatters.currency(transaction.amount)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         color: transaction.direction == 'CREDIT'
                             ? AppTheme.success
-                            : (isSuccess ? null : statusColor),
+                            : AppTheme.error,
                       ),
                 ),
                 const SizedBox(height: 4),
@@ -149,6 +149,10 @@ class TransactionTile extends StatelessWidget {
       case AppConstants.modeContact:
         return Icons.contacts_rounded;
       case AppConstants.modeManual:
+        final method = (transaction.upiAppName ?? '').toUpperCase();
+        if (method == 'CASH') return Icons.payments_rounded;
+        if (method == 'BANK') return Icons.account_balance_rounded;
+        if (method == 'UPI') return Icons.account_balance_wallet_rounded;
         return Icons.edit_rounded;
       case 'SMS_IMPORT':
         return Icons.sms_rounded;
@@ -166,6 +170,10 @@ class TransactionTile extends StatelessWidget {
       case AppConstants.modeContact:
         return 'Contact';
       case AppConstants.modeManual:
+        final method = transaction.upiAppName;
+        if (method != null && method.isNotEmpty) {
+          return 'Manual · $method';
+        }
         return 'Manual';
       case 'SMS_IMPORT':
         return transaction.direction == 'CREDIT' ? 'Received' : 'SMS';

@@ -111,6 +111,7 @@ class _NotificationPermissionBannerState
                 final granted = await SmsService.requestSmsPermission();
                 if (granted) {
                   ref.invalidate(smsPermissionProvider);
+                  ref.invalidate(smsSyncProvider);
                 } else {
                   // Permission denied — show the guide to help user
                   if (mounted) {

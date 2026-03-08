@@ -12,6 +12,12 @@ class Payees extends Table {
       integer().withDefault(const Constant(0))();
   DateTimeColumn get lastPaidAt => dateTime().nullable()();
 
+  // Preferred expense category for this payee (null = not yet set)
+  TextColumn get category => text().nullable()();
+
+  // Last time a transaction to/from this payee was imported
+  DateTimeColumn get lastTransactionAt => dateTime().nullable()();
+
   // Timestamps
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();

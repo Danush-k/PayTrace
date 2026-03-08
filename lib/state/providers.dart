@@ -7,10 +7,11 @@ import 'package:uuid/uuid.dart';
 
 import '../data/database/app_database.dart';
 import '../core/constants/app_constants.dart';
-import '../core/utils/category_engine.dart';
 import '../core/utils/recurring_detector.dart';
 import '../services/upi_service.dart';
 import '../services/notification_service.dart';
+import '../services/notification_pipeline.dart';
+import '../services/merchant_learning_service.dart';
 import '../services/sms_sync_service.dart';
 
 // ═══════════════════════════════════════════
@@ -82,6 +83,13 @@ final categorySpendingProvider =
     FutureProvider.family<Map<String, double>, DateTime>((ref, date) {
   final db = ref.watch(databaseProvider);
   return db.getCategorySpending(date.year, date.month);
+});
+
+/// Daily spending (day → amount) for a given month
+final dailySpendingProvider =
+    FutureProvider.family<Map<int, double>, DateTime>((ref, date) {
+  final db = ref.watch(databaseProvider);
+  return db.getDailySpending(date.year, date.month);
 });
 
 /// Search transactions
@@ -328,7 +336,8 @@ class PaymentNotifier extends StateNotifier<PaymentState> {
     final amount = state.amount ?? 0;
 
     // Auto-categorize the transaction
-    final category = CategoryEngine.categorize(
+    final category = await MerchantLearningService.categorize(
+      _db,
       payeeName: state.payeeName ?? '',
       upiId: state.payeeUpiId!,
     );
@@ -494,4 +503,20 @@ final notificationAccessProvider = FutureProvider<bool>((ref) {
 /// Stream of payment notifications from NotificationListenerService
 final paymentNotificationProvider = StreamProvider<PaymentNotification?>((ref) {
   return NotificationService.paymentNotifications;
+});
+
+/// Keeps the NotificationPipeline alive for the entire app lifetime.
+///
+/// Because this is a non-autoDispose provider, the pipeline is started
+/// once on first watch and never torn down until the ProviderContainer is
+/// closed (app exit). This ensures GPay / PhonePe / Paytm / Amazon Pay
+/// notifications are captured even when the user is on a non-Home tab.
+///
+/// Watch this provider in HomeScreen (alongside smsSyncProvider) so it
+/// is created on first build.
+final notificationPipelineProvider = Provider<NotificationPipeline>((ref) {
+  final db = ref.watch(databaseProvider);
+  final pipeline = NotificationPipeline.start(db: db);
+  ref.onDispose(pipeline.dispose);
+  return pipeline;
 });

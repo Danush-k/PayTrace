@@ -137,6 +137,42 @@ class UpiService {
     }
   }
 
+  /// Launch a direct UPI payment intent (`upi://pay`).
+  ///
+  /// If [packageName] is omitted, Android shows the app chooser when multiple
+  /// UPI apps are installed.
+  static Future<bool> launchUpiPayIntent({
+    required String payeeUpiId,
+    required String payeeName,
+    required double amount,
+    String? note,
+    String? txnRef,
+    String currency = 'INR',
+    String? packageName,
+  }) async {
+    try {
+      final result = await _channel.invokeMethod(
+        'launchUpiPayIntent',
+        {
+          'pa': payeeUpiId,
+          'pn': payeeName,
+          'am': amount.toStringAsFixed(2),
+          'tn': note,
+          'tr': txnRef,
+          'cu': currency,
+          'package': packageName,
+        },
+      );
+      debugPrint('PayTrace: launchUpiPayIntent -> $result');
+      return result == true;
+    } on PlatformException catch (e) {
+      debugPrint(
+        'PayTrace: launchUpiPayIntent error: ${e.code} - ${e.message}',
+      );
+      return false;
+    }
+  }
+
   /// Check if notification listener permission is enabled
   static Future<bool> isNotificationAccessEnabled() async {
     try {

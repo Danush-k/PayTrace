@@ -1,1695 +1,334 @@
+import 'dart:math';
+
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
-import '../../core/utils/spend_velocity_engine.dart';
-import '../../core/utils/discipline_score_engine.dart';
-import '../../core/utils/category_drift_engine.dart';
 import '../../core/utils/insight_generator.dart';
-import '../../core/utils/anomaly_detector.dart';
-import '../../core/utils/personality_engine.dart';
+import '../../core/utils/spending_insights_engine.dart';
 import '../../state/providers.dart';
-import '../../data/database/app_database.dart';
 
-// ═══════════════════════════════════════════
-//  INSIGHTS PROVIDERS
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROVIDER
+// ═══════════════════════════════════════════════════════════════════════════
 
-/// All analytics data bundled into one provider for the current month.
-final insightsProvider = FutureProvider.autoDispose<InsightsData?>((ref) async {
+final insightsDashboardProvider =
+    FutureProvider.autoDispose<_InsightsDashboard?>((ref) async {
   final db = ref.watch(databaseProvider);
   final now = DateTime.now();
 
-  // Fetch current month + previous 3 months + budget in parallel
-  final prevDates = [
-    for (int i = 1; i <= 3; i++) DateTime(now.year, now.month - i, 1),
-  ];
+  final txns = await db.getAllTransactions();
+  if (txns.isEmpty) return null;
 
-  final results = await Future.wait([
-    db.getMonthTransactions(now.year, now.month),
-    for (final d in prevDates) db.getMonthTransactions(d.year, d.month),
-    db.getBudget(now.year, now.month),
-  ]);
-
-  final currentTxns = results[0] as List<Transaction>;
-  if (currentTxns.isEmpty) return null;
-
-  final prevMonths = <List<Transaction>>[
-    for (int i = 1; i <= 3; i++)
-      if ((results[i] as List<Transaction>).isNotEmpty)
-        results[i] as List<Transaction>,
-  ];
-
-  final budget = results[4] as Budget?;
-
-  // Run all engines
-  final velocity = SpendVelocityEngine.analyze(
-    transactions: currentTxns,
-    year: now.year,
-    month: now.month,
-    budgetLimit: budget?.limitAmount,
-  );
-
-  final discipline = DisciplineScoreEngine.calculate(
-    transactions: currentTxns,
-    year: now.year,
-    month: now.month,
-    budgetLimit: budget?.limitAmount,
-  );
-
-  final drift = CategoryDriftEngine.analyze(
-    currentMonthTxns: currentTxns,
-    previousMonthsTxns: prevMonths,
-  );
-
-  // Run anomaly detection
-  final anomalies = AnomalyDetector.detect(
-    currentMonthTxns: currentTxns,
-    previousMonthsTxns: prevMonths,
-  );
-
-  // Run personality engine
-  final personality = PersonalityEngine.analyze(
-    discipline: discipline,
-    drift: drift,
-    velocity: velocity,
-    currentTransactions: currentTxns,
-  );
-
-  // Get daily spending for heatmap
-  final dailySpending = await db.getDailySpending(now.year, now.month);
-
+  final result = SpendingInsightsEngine.analyze(transactions: txns);
   final insights = InsightGenerator.generate(
-    velocity: velocity,
-    discipline: discipline,
-    drift: drift,
-    anomalies: anomalies,
+    transactions: txns,
+    spendingInsights: result,
+    referenceDate: now,
   );
 
-  return InsightsData(
-    velocity: velocity,
-    discipline: discipline,
-    drift: drift,
+  // ── Top merchant this week (Mon–today) ────────────────────────────────
+  final today = DateTime(now.year, now.month, now.day);
+  final weekStart = today.subtract(Duration(days: today.weekday - 1));
+  final weeklyDebits = txns.where((t) {
+    if (t.direction != 'DEBIT' || t.status != 'SUCCESS') return false;
+    final d = DateTime(t.createdAt.year, t.createdAt.month, t.createdAt.day);
+    return !d.isBefore(weekStart) && !d.isAfter(today);
+  }).toList();
+
+  MerchantSpendEntry? topMerchantThisWeek;
+  if (weeklyDebits.isNotEmpty) {
+    final spend = <String, double>{};
+    final counts = <String, int>{};
+    final cats = <String, String>{};
+    for (final t in weeklyDebits) {
+      final key =
+          t.payeeName.trim().isNotEmpty ? t.payeeName.trim() : t.payeeUpiId;
+      spend.update(key, (v) => v + t.amount, ifAbsent: () => t.amount);
+      counts.update(key, (v) => v + 1, ifAbsent: () => 1);
+      cats.putIfAbsent(key, () => t.category);
+    }
+    final top = spend.entries.reduce((a, b) => a.value >= b.value ? a : b);
+    topMerchantThisWeek = MerchantSpendEntry(
+      displayName: top.key,
+      upiId: '',
+      totalAmount: top.value,
+      transactionCount: counts[top.key]!,
+      category: cats[top.key]!,
+      shareOfTotal: result.topMerchants.totalSpent > 0
+          ? (top.value / result.topMerchants.totalSpent) * 100
+          : 0,
+    );
+  }
+
+  return _InsightsDashboard(
+    month: now,
     insights: insights,
-    anomalies: anomalies,
-    personality: personality,
-    dailySpending: dailySpending,
+    result: result,
+    topMerchantThisWeek: topMerchantThisWeek,
   );
 });
 
-class InsightsData {
-  final SpendVelocityResult velocity;
-  final DisciplineScoreResult discipline;
-  final CategoryDriftResult drift;
+class _InsightsDashboard {
+  final DateTime month;
   final List<Insight> insights;
-  final AnomalyResult anomalies;
-  final SpendingPersonality personality;
-  final Map<int, double> dailySpending;
+  final SpendingInsightsResult result;
+  final MerchantSpendEntry? topMerchantThisWeek;
 
-  const InsightsData({
-    required this.velocity,
-    required this.discipline,
-    required this.drift,
+  const _InsightsDashboard({
+    required this.month,
     required this.insights,
-    required this.anomalies,
-    required this.personality,
-    required this.dailySpending,
+    required this.result,
+    required this.topMerchantThisWeek,
   });
 }
 
-// ═══════════════════════════════════════════
-//  INSIGHTS SCREEN
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAIN SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
 
 class InsightsScreen extends ConsumerWidget {
   const InsightsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final insightsAsync = ref.watch(insightsProvider);
-    final now = DateTime.now();
+    final async = ref.watch(insightsDashboardProvider);
 
-    return Scaffold(
-      body: SafeArea(
-        child: insightsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error: $e')),
-          data: (data) {
-            if (data == null) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.insights_outlined,
-                            size: 40, color: AppTheme.primary),
-                      ),
-                      const SizedBox(height: 20),
-                      Text('No insights yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Insights will appear once you have\ntransaction data this month',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).brightness ==
-                                      Brightness.dark
-                                  ? AppTheme.textSecondaryDark
-                                  : AppTheme.textSecondaryLight,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, _) => Center(child: Text('Error: $err')),
+      data: (data) {
+        if (data == null) {
+          return Center(
+            child: Text(
+              'Add transactions to see insights',
+              style: Theme.of(context).textTheme.bodyLarge,
+            ),
+          );
+        }
 
-            // Separate insights by type for grouped display
-            final warnings = data.insights
-                .where((i) => i.type == InsightType.warning)
-                .toList();
-            final tips = data.insights
-                .where((i) =>
-                    i.type == InsightType.tip || i.type == InsightType.info)
-                .toList();
-            final positives = data.insights
-                .where((i) => i.type == InsightType.positive)
-                .toList();
-
-            return ListView(
-              padding: const EdgeInsets.only(bottom: 32),
-              children: [
-                // ── Header ──
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Insights',
-                        style: Theme.of(context)
-                            .textTheme
-                            .headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(width: 8),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Text(
-                          Formatters.monthYear(now),
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Theme.of(context).brightness ==
-                                            Brightness.dark
-                                        ? AppTheme.textSecondaryDark
-                                        : AppTheme.textSecondaryLight,
-                                  ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                // ── Personality Card ──
-                _PersonalityCard(personality: data.personality),
-
-                const SizedBox(height: 4),
-
-                // ── Score Overview (compact row) ──
-                _ScoreOverviewCard(
-                  discipline: data.discipline,
-                  velocity: data.velocity,
-                ),
-
-                // ── Anomaly Alerts ──
-                if (data.anomalies.alerts.isNotEmpty) ...[
-                  _SectionLabel(
-                    icon: Icons.gpp_maybe_outlined,
-                    label: 'Anomaly Alerts',
-                    color: AppTheme.error,
-                  ),
-                  _AnomalyAlertsBanner(anomalies: data.anomalies),
-                ],
-
-                // ── Warnings Section ──
-                if (warnings.isNotEmpty) ...[
-                  _SectionLabel(
-                    icon: Icons.warning_amber_rounded,
-                    label: 'Needs Attention',
-                    color: AppTheme.error,
-                  ),
-                  ...warnings.map((i) => _InsightTile(insight: i)),
-                ],
-
-                // ── Spend Velocity ──
-                _SectionLabel(
-                  icon: Icons.speed_rounded,
-                  label: 'Spending Pace',
-                  color: AppTheme.primary,
-                ),
-                _SpendVelocityCard(velocity: data.velocity),
-
-                // ── Category Shifts ──
-                if (data.drift.hasDrifts) ...[
-                  _SectionLabel(
-                    icon: Icons.compare_arrows_rounded,
-                    label: 'Category Changes',
-                    color: AppTheme.warning,
-                  ),
-                  _CategoryDriftCard(drift: data.drift),
-                ],
-
-                // ── Spending Heatmap Calendar ──
-                if (data.dailySpending.isNotEmpty) ...[
-                  _SectionLabel(
-                    icon: Icons.calendar_month_rounded,
-                    label: 'Spending Heatmap',
-                    color: AppTheme.primary,
-                  ),
-                  _SpendingHeatmapCard(
-                    dailySpending: data.dailySpending,
-                    year: now.year,
-                    month: now.month,
-                  ),
-                ],
-
-                // ── Time of Day ──
-                if (data.drift.timeOfDaySpend.values
-                        .fold<double>(0, (s, v) => s + v) >
-                    0) ...[
-                  _SectionLabel(
-                    icon: Icons.schedule_rounded,
-                    label: 'When You Spend',
-                    color: AppTheme.primaryLight,
-                  ),
-                  _TimeOfDayCard(timeData: data.drift.timeOfDaySpend),
-                ],
-
-                // ── Tips ──
-                if (tips.isNotEmpty) ...[
-                  _SectionLabel(
-                    icon: Icons.lightbulb_outline_rounded,
-                    label: 'Tips & Info',
-                    color: AppTheme.warning,
-                  ),
-                  ...tips.map((i) => _InsightTile(insight: i)),
-                ],
-
-                // ── Positives ──
-                if (positives.isNotEmpty) ...[
-                  _SectionLabel(
-                    icon: Icons.thumb_up_alt_outlined,
-                    label: 'What\'s Going Well',
-                    color: AppTheme.success,
-                  ),
-                  ...positives.map((i) => _InsightTile(insight: i)),
-                ],
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════
-//  SECTION LABEL
-// ═══════════════════════════════════════════
-
-class _SectionLabel extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  const _SectionLabel({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Text(
-            label.toUpperCase(),
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════
-//  SCORE OVERVIEW CARD (compact)
-// ═══════════════════════════════════════════
-
-class _ScoreOverviewCard extends StatelessWidget {
-  final DisciplineScoreResult discipline;
-  final SpendVelocityResult velocity;
-
-  const _ScoreOverviewCard({
-    required this.discipline,
-    required this.velocity,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: _gradeGradient(discipline.grade),
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 120),
           children: [
-            // Top row: Score + Grade + Quick stats
-            Row(
-              children: [
-                // Score ring
-                SizedBox(
-                  width: 72,
-                  height: 72,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 72,
-                        height: 72,
-                        child: CircularProgressIndicator(
-                          value: discipline.totalScore / 100,
-                          strokeWidth: 6,
-                          backgroundColor: Colors.white.withValues(alpha: 0.2),
-                          valueColor:
-                              const AlwaysStoppedAnimation(Colors.white),
-                        ),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${discipline.totalScore}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              height: 1,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            discipline.grade,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.8),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 20),
-                // Summary stats
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Financial Discipline',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          _MiniStat(
-                            label: 'Spent',
-                            value: Formatters.currencyCompact(
-                                discipline.totalSpent),
-                          ),
-                          const SizedBox(width: 16),
-                          _MiniStat(
-                            label: 'Received',
-                            value: Formatters.currencyCompact(
-                                discipline.totalReceived),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Sub-score bars — compact 2-column layout
-            Row(
-              children: [
-                Expanded(
-                  child: _CompactScoreBar(
-                      label: 'Budget',
-                      value: discipline.budgetScore,
-                      max: 30),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _CompactScoreBar(
-                      label: 'Savings',
-                      value: discipline.savingsScore,
-                      max: 25),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _CompactScoreBar(
-                      label: 'Consistency',
-                      value: discipline.consistencyScore,
-                      max: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _CompactScoreBar(
-                      label: 'Diversity',
-                      value: discipline.diversityScore,
-                      max: 15),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _CompactScoreBar(
-                label: 'Regularity',
-                value: discipline.regularityScore,
-                max: 10),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<Color> _gradeGradient(String grade) {
-    switch (grade) {
-      case 'A+':
-      case 'A':
-        return [const Color(0xFF00B09B), const Color(0xFF96C93D)];
-      case 'B+':
-      case 'B':
-        return [const Color(0xFF4A42DB), const Color(0xFF6C63FF)];
-      case 'C':
-        return [const Color(0xFFFF8C00), const Color(0xFFFFAB40)];
-      default:
-        return [const Color(0xFFFF5252), const Color(0xFFFF8A80)];
-    }
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  final String label;
-  final String value;
-  const _MiniStat({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.6),
-            fontSize: 11,
-          ),
-        ),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CompactScoreBar extends StatelessWidget {
-  final String label;
-  final int value;
-  final int max;
-
-  const _CompactScoreBar({
-    required this.label,
-    required this.value,
-    required this.max,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
+            // ── Header ────────────────────────────────────────────────────
             Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 11,
-              ),
+              'Insights',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
             ),
             Text(
-              '$value/$max',
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
-                fontSize: 10,
-              ),
+              Formatters.monthYear(data.month),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: Colors.white54),
             ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: LinearProgressIndicator(
-            value: max > 0 ? value / max : 0,
-            backgroundColor: Colors.white.withValues(alpha: 0.15),
-            valueColor: const AlwaysStoppedAnimation(Colors.white),
-            minHeight: 4,
-          ),
-        ),
-      ],
-    );
-  }
-}
+            const SizedBox(height: 20),
 
-// ═══════════════════════════════════════════
-//  SPEND VELOCITY CARD
-// ═══════════════════════════════════════════
-
-class _SpendVelocityCard extends StatelessWidget {
-  final SpendVelocityResult velocity;
-  const _SpendVelocityCard({required this.velocity});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Trend badge
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Day ${velocity.daysElapsed} of ${velocity.daysInMonth}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark
-                        ? AppTheme.textSecondaryDark
-                        : AppTheme.textSecondaryLight,
-                  ),
-                ),
-                _TrendChip(trend: velocity.trend),
-              ],
-            ),
-
+            // ── 1  Daily Spending Bar Chart (Mon–Sun) ─────────────────────
+            _DailySpendingBarCard(insight: data.result.weeklyComparison),
             const SizedBox(height: 16),
 
-            // Primary metrics row
-            Row(
-              children: [
-                Expanded(
-                  child: _MetricBlock(
-                    label: 'Spent so far',
-                    value: Formatters.currencyCompact(velocity.totalSoFar),
-                    icon: Icons.account_balance_wallet_outlined,
-                    iconColor: AppTheme.primary,
-                    isDark: isDark,
-                  ),
-                ),
-                Container(
-                  width: 1,
-                  height: 40,
-                  color: isDark
-                      ? AppTheme.borderDark
-                      : AppTheme.borderLight,
-                ),
-                Expanded(
-                  child: _MetricBlock(
-                    label: 'Daily avg',
-                    value: Formatters.currencyCompact(velocity.dailyAverage),
-                    icon: Icons.calendar_today_rounded,
-                    iconColor: AppTheme.primaryLight,
-                    isDark: isDark,
-                  ),
-                ),
-              ],
-            ),
+            // ── 2  Category Distribution (pie only, no cards) ─────────────
+            _CategoryPieCard(insight: data.result.categoryDistribution),
+            const SizedBox(height: 16),
 
-            const SizedBox(height: 12),
-
-            // Secondary metrics row
-            Row(
-              children: [
-                Expanded(
-                  child: _MetricBlock(
-                    label: 'Projected',
-                    value: Formatters.currencyCompact(
-                        velocity.projectedMonthEnd),
-                    icon: Icons.trending_up_rounded,
-                    iconColor: velocity.willExceedBudget
-                        ? AppTheme.error
-                        : AppTheme.success,
-                    isDark: isDark,
-                    highlight: velocity.willExceedBudget,
-                  ),
-                ),
-                if (velocity.budgetLimit != null) ...[
-                  Container(
-                    width: 1,
-                    height: 40,
-                    color: isDark
-                        ? AppTheme.borderDark
-                        : AppTheme.borderLight,
-                  ),
-                  Expanded(
-                    child: _MetricBlock(
-                      label: 'Safe daily limit',
-                      value: velocity.safeDailyBudget > 0
-                          ? Formatters.currencyCompact(
-                              velocity.safeDailyBudget)
-                          : '—',
-                      icon: Icons.shield_outlined,
-                      iconColor: AppTheme.success,
-                      isDark: isDark,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-
-            // Budget progress bar
-            if (velocity.budgetLimit != null) ...[
+            // ── 3  Top Merchant This Week ─────────────────────────────────
+            if (data.topMerchantThisWeek != null) ...[
+              _TopMerchantCard(merchant: data.topMerchantThisWeek!),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: (velocity.totalSoFar / velocity.budgetLimit!)
-                            .clamp(0, 1)
-                            .toDouble(),
-                        backgroundColor: isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : Colors.black.withValues(alpha: 0.05),
-                        valueColor: AlwaysStoppedAnimation(
-                          velocity.willExceedBudget
-                              ? AppTheme.error
-                              : AppTheme.success,
-                        ),
-                        minHeight: 6,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    '${(velocity.totalSoFar / velocity.budgetLimit! * 100).toStringAsFixed(0)}%',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: velocity.willExceedBudget
-                          ? AppTheme.error
-                          : AppTheme.success,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'of ${Formatters.currencyCompact(velocity.budgetLimit!)} budget',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontSize: 11,
-                  color: isDark
-                      ? AppTheme.textSecondaryDark
-                      : AppTheme.textSecondaryLight,
-                ),
-              ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-}
 
-class _MetricBlock extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color iconColor;
-  final bool isDark;
-  final bool highlight;
-
-  const _MetricBlock({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.iconColor,
-    required this.isDark,
-    this.highlight = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: iconColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 10,
-                    color: isDark
-                        ? AppTheme.textSecondaryDark
-                        : AppTheme.textSecondaryLight,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: highlight ? AppTheme.error : null,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrendChip extends StatelessWidget {
-  final SpendTrend trend;
-  const _TrendChip({required this.trend});
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, color, icon) = switch (trend) {
-      SpendTrend.accelerating => ('Rising', AppTheme.error, Icons.trending_up),
-      SpendTrend.decelerating =>
-        ('Falling', AppTheme.success, Icons.trending_down),
-      SpendTrend.stable => ('Stable', AppTheme.primary, Icons.trending_flat),
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════
-//  CATEGORY DRIFT CARD
-// ═══════════════════════════════════════════
-
-class _CategoryDriftCard extends StatelessWidget {
-  final CategoryDriftResult drift;
-  const _CategoryDriftCard({required this.drift});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ...drift.drifts.take(5).map((d) {
-              final color =
-                  d.isIncrease ? AppTheme.error : AppTheme.success;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Row(
-                  children: [
-                    // Change indicator
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        d.isIncrease
-                            ? Icons.arrow_upward_rounded
-                            : Icons.arrow_downward_rounded,
-                        size: 16,
-                        color: color,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Category name + amount
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            d.category,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Text(
-                            Formatters.currencyCompact(d.currentAmount),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? AppTheme.textSecondaryDark
-                                  : AppTheme.textSecondaryLight,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Percentage change
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        '${d.isIncrease ? '+' : ''}${d.changePercent.toStringAsFixed(0)}%',
-                        style: TextStyle(
-                          color: color,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════
-//  TIME-OF-DAY CARD
-// ═══════════════════════════════════════════
-
-class _TimeOfDayCard extends StatelessWidget {
-  final Map<String, double> timeData;
-  const _TimeOfDayCard({required this.timeData});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final total = timeData.values.fold<double>(0, (s, v) => s + v);
-    if (total == 0) return const SizedBox.shrink();
-
-    final entries = timeData.entries.toList();
-    final colors = [
-      const Color(0xFFFFBE0B), // Morning
-      const Color(0xFFFF6B6B), // Afternoon
-      const Color(0xFF6C63FF), // Evening
-      const Color(0xFF3A86FF), // Night
-    ];
-
-    final icons = [
-      Icons.wb_sunny_outlined,
-      Icons.wb_twilight_rounded,
-      Icons.nightlight_outlined,
-      Icons.dark_mode_outlined,
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Stacked horizontal bar
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                height: 12,
-                child: Row(
-                  children: [
-                    for (int i = 0; i < entries.length; i++)
-                      if (entries[i].value > 0)
-                        Expanded(
-                          flex: (entries[i].value / total * 100)
-                              .round()
-                              .clamp(1, 100),
-                          child: Container(color: colors[i]),
-                        ),
-                  ],
-                ),
-              ),
+            // ── 4  Daily Spending Average ─────────────────────────────────
+            _DailyAverageCard(
+              insight: data.result.dailyAverage,
+              weeklyInsight: data.result.weeklyComparison,
             ),
             const SizedBox(height: 16),
 
-            // Time slots as rows
-            for (int i = 0; i < entries.length; i++) ...[
-              if (entries[i].value > 0)
-                Padding(
-                  padding: EdgeInsets.only(
-                      bottom: i < entries.length - 1 ? 10 : 0),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: colors[i].withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(7),
-                        ),
-                        child: Icon(icons[i], size: 14, color: colors[i]),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          entries[i].key,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: isDark
-                                ? AppTheme.textSecondaryDark
-                                : AppTheme.textSecondaryLight,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        Formatters.currencyCompact(entries[i].value),
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: 36,
-                        child: Text(
-                          '${(entries[i].value / total * 100).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                            color: colors[i],
-                            fontWeight: FontWeight.w700,
-                            fontSize: 11,
-                          ),
-                          textAlign: TextAlign.right,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+            // ── 5  Peak Spending Time ─────────────────────────────────────
+            if (data.result.timeOfDay.totalSpent > 0) ...[
+              _PeakTimeCard(insight: data.result.timeOfDay),
+              const SizedBox(height: 16),
             ],
+
+            // ── 6  Weekend vs Weekday ─────────────────────────────────────
+            if (data.result.weekendVsWeekday.total > 0) ...[
+              _WeekendVsWeekdayCard(insight: data.result.weekendVsWeekday),
+              const SizedBox(height: 16),
+            ],
+
+            // ── 7  Statistical Insight Cards ──────────────────────────────
+            _AnalyticsCards(insights: data.insights),
           ],
-        ),
-      ),
+        );
+      },
     );
   }
 }
 
-// ═══════════════════════════════════════════
-//  INSIGHT TILE
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+//  1. DAILY SPENDING BAR CHART  (Mon–Sun, weekday=blue, weekend=orange)
+// ═══════════════════════════════════════════════════════════════════════════
 
-class _InsightTile extends StatelessWidget {
-  final Insight insight;
-  const _InsightTile({required this.insight});
+class _DailySpendingBarCard extends StatelessWidget {
+  final WeeklyComparisonInsight insight;
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+  const _DailySpendingBarCard({required this.insight});
 
-    final accentColor = switch (insight.type) {
-      InsightType.warning => AppTheme.error,
-      InsightType.tip => AppTheme.warning,
-      InsightType.positive => AppTheme.success,
-      InsightType.info => AppTheme.primary,
-    };
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-          ),
-        ),
-        child: Row(
-          children: [
-            // Left accent strip
-            Container(
-              width: 4,
-              height: 56,
-              decoration: BoxDecoration(
-                color: accentColor,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  bottomLeft: Radius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(insight.icon, style: const TextStyle(fontSize: 18)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      insight.title,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      insight.message,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: isDark
-                            ? AppTheme.textSecondaryDark
-                            : AppTheme.textSecondaryLight,
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-        ),
-      ),
-    );
-  }
-}
-// ═══════════════════════════════════════════
-//  PERSONALITY CARD
-// ═══════════════════════════════════════════
-
-class _PersonalityCard extends StatelessWidget {
-  final SpendingPersonality personality;
-  const _PersonalityCard({required this.personality});
+  static const _weekdayColor = AppTheme.primary;
+  static const _weekendColor = Color(0xFFFFAB40);
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _fullDays = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final maxY = insight.maxDailyValue;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: personality.gradientColors
-                .map((c) => Color(c))
-                .toList(),
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Emoji + Title row
-            Row(
-              children: [
-                Text(
-                  personality.emoji,
-                  style: const TextStyle(fontSize: 36),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'YOUR SPENDING PERSONA',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        personality.title,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-
-            // Description
-            Text(
-              personality.description,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85),
-                fontSize: 13,
-                height: 1.4,
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Trait chips
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TraitChip(
-                  icon: personality.timeTrait.icon,
-                  label: personality.timeTrait.label,
-                ),
-                _TraitChip(
-                  icon: personality.categoryTrait.icon,
-                  label: personality.categoryTrait.label,
-                ),
-                _TraitChip(
-                  icon: personality.paceTrait.icon,
-                  label: personality.paceTrait.label,
-                ),
-                _TraitChip(
-                  icon: personality.disciplineTrait.icon,
-                  label: personality.disciplineTrait.label,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TraitChip extends StatelessWidget {
-  final String icon;
-  final String label;
-  const _TraitChip({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(icon, style: const TextStyle(fontSize: 14)),
-          const SizedBox(width: 6),
           Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+            'This Week\'s Spending',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${Formatters.currency(insight.thisWeekTotal)} total',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.white54),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 200,
+            child: BarChart(
+              BarChartData(
+                maxY: max(1, maxY * 1.25),
+                barTouchData: BarTouchData(
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipColor: (_) =>
+                        const Color(0xFF1E1E2C),
+                    getTooltipItem: (group, gI, rod, rI) {
+                      final idx = group.x;
+                      return BarTooltipItem(
+                        '${_fullDays[idx]} – ${Formatters.currency(rod.toY)} spent',
+                        TextStyle(
+                          color: idx >= 5 ? _weekendColor : _weekdayColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  horizontalInterval: max(1, maxY / 4),
+                  getDrawingHorizontalLine: (_) => FlLine(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    strokeWidth: 1,
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  leftTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (value, _) {
+                        final i = value.toInt();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            _days[i],
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: i >= 5
+                                      ? _weekendColor
+                                      : Colors.white60,
+                                ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                barGroups: List.generate(7, (i) {
+                  final amount = insight.thisWeekDaily[i] ?? 0;
+                  final isWeekend = i >= 5;
+                  return BarChartGroupData(
+                    x: i,
+                    barRods: [
+                      BarChartRodData(
+                        toY: amount,
+                        color: isWeekend ? _weekendColor : _weekdayColor,
+                        width: 22,
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(6)),
+                        backDrawRodData: BackgroundBarChartRodData(
+                          show: true,
+                          toY: max(1, maxY * 1.25),
+                          color: Colors.white.withValues(alpha: 0.03),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+              ),
             ),
+          ),
+          const SizedBox(height: 12),
+          // Legend row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _LegendDot(color: _weekdayColor, label: 'Weekday'),
+              const SizedBox(width: 20),
+              _LegendDot(color: _weekendColor, label: 'Weekend'),
+            ],
           ),
         ],
       ),
     );
-  }
-}
-
-// ═══════════════════════════════════════════
-//  ANOMALY ALERTS BANNER
-// ═══════════════════════════════════════════
-
-class _AnomalyAlertsBanner extends StatelessWidget {
-  final AnomalyResult anomalies;
-  const _AnomalyAlertsBanner({required this.anomalies});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: AppTheme.error.withValues(alpha: 0.3),
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Risk score header
-            Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: _riskColor(anomalies.riskScore)
-                        .withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.shield_outlined,
-                        size: 14,
-                        color: _riskColor(anomalies.riskScore),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Risk Score: ${anomalies.riskScore}',
-                        style: TextStyle(
-                          color: _riskColor(anomalies.riskScore),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${anomalies.alerts.length} flagged',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark
-                        ? AppTheme.textSecondaryDark
-                        : AppTheme.textSecondaryLight,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // Alert items
-            ...anomalies.alerts.take(4).map((alert) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(alert.icon, style: const TextStyle(fontSize: 18)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              alert.title,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              alert.message,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: isDark
-                                    ? AppTheme.textSecondaryDark
-                                    : AppTheme.textSecondaryLight,
-                                fontSize: 11,
-                                height: 1.3,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Severity indicator
-                      Container(
-                        width: 8,
-                        height: 8,
-                        margin: const EdgeInsets.only(top: 6),
-                        decoration: BoxDecoration(
-                          color: alert.severity <= 2
-                              ? AppTheme.error
-                              : alert.severity <= 3
-                                  ? AppTheme.warning
-                                  : AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _riskColor(int score) {
-    if (score >= 60) return AppTheme.error;
-    if (score >= 30) return AppTheme.warning;
-    return AppTheme.success;
-  }
-}
-
-// ═══════════════════════════════════════════
-//  SPENDING HEATMAP CALENDAR
-// ═══════════════════════════════════════════
-
-class _SpendingHeatmapCard extends StatelessWidget {
-  final Map<int, double> dailySpending;
-  final int year;
-  final int month;
-
-  const _SpendingHeatmapCard({
-    required this.dailySpending,
-    required this.year,
-    required this.month,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final daysInMonth = DateTime(year, month + 1, 0).day;
-    final firstWeekday = DateTime(year, month, 1).weekday; // 1=Mon, 7=Sun
-    final today = DateTime.now().day;
-
-    // Calculate percentile thresholds for coloring
-    final values = dailySpending.values.where((v) => v > 0).toList()..sort();
-    final p25 = values.isNotEmpty
-        ? values[(values.length * 0.25).floor()]
-        : 0.0;
-    final p50 = values.isNotEmpty
-        ? values[(values.length * 0.50).floor()]
-        : 0.0;
-    final p75 = values.isNotEmpty
-        ? values[(values.length * 0.75).floor()]
-        : 0.0;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : AppTheme.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Weekday headers
-            Row(
-              children: ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-                  .map((d) => Expanded(
-                        child: Center(
-                          child: Text(
-                            d,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? AppTheme.textSecondaryDark
-                                  : AppTheme.textSecondaryLight,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ))
-                  .toList(),
-            ),
-            const SizedBox(height: 8),
-
-            // Calendar grid
-            _buildCalendarGrid(
-              context,
-              daysInMonth: daysInMonth,
-              firstWeekday: firstWeekday,
-              today: today,
-              isDark: isDark,
-              p25: p25,
-              p50: p50,
-              p75: p75,
-            ),
-
-            const SizedBox(height: 14),
-
-            // Legend
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _LegendDot(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.06)
-                      : Colors.black.withValues(alpha: 0.04),
-                  label: 'None',
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: const Color(0xFFA5D6A7),
-                  label: 'Low',
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: const Color(0xFFFFCC02),
-                  label: 'Med',
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: const Color(0xFFFF8A65),
-                  label: 'High',
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 12),
-                _LegendDot(
-                  color: const Color(0xFFEF5350),
-                  label: 'Very High',
-                  isDark: isDark,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCalendarGrid(
-    BuildContext context, {
-    required int daysInMonth,
-    required int firstWeekday,
-    required int today,
-    required bool isDark,
-    required double p25,
-    required double p50,
-    required double p75,
-  }) {
-    final rows = <Widget>[];
-    int dayCounter = 1;
-
-    // Calculate total rows needed
-    final totalCells = (firstWeekday - 1) + daysInMonth;
-    final totalRows = (totalCells / 7).ceil();
-
-    for (int row = 0; row < totalRows; row++) {
-      final cells = <Widget>[];
-      for (int col = 0; col < 7; col++) {
-        final cellIndex = row * 7 + col;
-        if (cellIndex < firstWeekday - 1 || dayCounter > daysInMonth) {
-          cells.add(const Expanded(child: SizedBox(height: 36)));
-        } else {
-          final day = dayCounter;
-          final amount = dailySpending[day] ?? 0;
-          final isToday = day == today;
-          final isFuture = day > today;
-
-          cells.add(Expanded(
-            child: Tooltip(
-              message: amount > 0
-                  ? 'Day $day: ₹${amount.toStringAsFixed(0)}'
-                  : 'Day $day: No spending',
-              child: Container(
-                height: 36,
-                margin: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: isFuture
-                      ? (isDark
-                          ? Colors.white.withValues(alpha: 0.03)
-                          : Colors.black.withValues(alpha: 0.02))
-                      : _heatColor(amount, p25, p50, p75, isDark),
-                  borderRadius: BorderRadius.circular(6),
-                  border: isToday
-                      ? Border.all(color: AppTheme.primary, width: 2)
-                      : null,
-                ),
-                child: Center(
-                  child: Text(
-                    '$day',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: isToday ? FontWeight.bold : FontWeight.w500,
-                      color: isToday
-                          ? AppTheme.primary
-                          : isFuture
-                              ? (isDark
-                                  ? Colors.white.withValues(alpha: 0.2)
-                                  : Colors.black.withValues(alpha: 0.2))
-                              : (isDark ? Colors.white : Colors.black87),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ));
-          dayCounter++;
-        }
-      }
-      rows.add(Row(children: cells));
-    }
-
-    return Column(children: rows);
-  }
-
-  Color _heatColor(
-      double amount, double p25, double p50, double p75, bool isDark) {
-    if (amount <= 0) {
-      return isDark
-          ? Colors.white.withValues(alpha: 0.06)
-          : Colors.black.withValues(alpha: 0.04);
-    }
-    if (amount <= p25) return const Color(0xFFA5D6A7); // light green
-    if (amount <= p50) return const Color(0xFFFFCC02); // yellow
-    if (amount <= p75) return const Color(0xFFFF8A65); // orange
-    return const Color(0xFFEF5350); // red
   }
 }
 
 class _LegendDot extends StatelessWidget {
   final Color color;
   final String label;
-  final bool isDark;
-  const _LegendDot(
-      {required this.color, required this.label, required this.isDark});
+  const _LegendDot({required this.color, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1699,21 +338,923 @@ class _LegendDot extends StatelessWidget {
         Container(
           width: 10,
           height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 5),
         Text(
           label,
-          style: TextStyle(
-            fontSize: 10,
-            color: isDark
-                ? AppTheme.textSecondaryDark
-                : AppTheme.textSecondaryLight,
-          ),
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: Colors.white54, fontSize: 11),
         ),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  2. CATEGORY PIE (donut, touch, legend grid – no stray cards)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _CategoryPieCard extends StatefulWidget {
+  final CategoryDistributionInsight insight;
+  const _CategoryPieCard({required this.insight});
+  @override
+  State<_CategoryPieCard> createState() => _CategoryPieCardState();
+}
+
+class _CategoryPieCardState extends State<_CategoryPieCard> {
+  int _touched = -1;
+
+  static const _palette = [
+    Color(0xFF6C63FF),
+    Color(0xFFFF6B6B),
+    Color(0xFFFFAB40),
+    Color(0xFF26C6DA),
+    Color(0xFF66BB6A),
+    Color(0xFFEC407A),
+    Color(0xFF42A5F5),
+    Color(0xFFAB47BC),
+  ];
+
+  Color _color(String cat) => _palette[cat.hashCode.abs() % _palette.length];
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.insight.entries.isEmpty) return const SizedBox.shrink();
+
+    final sorted = [...widget.insight.entries]
+      ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
+
+    final List<CategorySpendEntry> slices;
+    if (sorted.length <= 7) {
+      slices = sorted;
+    } else {
+      final top6 = sorted.take(6).toList();
+      final otherAmt =
+          sorted.skip(6).fold<double>(0, (s, e) => s + e.totalAmount);
+      final total = sorted.fold<double>(0, (s, e) => s + e.totalAmount);
+      slices = [
+        ...top6,
+        CategorySpendEntry(
+          category: 'Other',
+          totalAmount: otherAmt,
+          transactionCount: 0,
+          percentage: total > 0 ? (otherAmt / total) * 100 : 0,
+        ),
+      ];
+    }
+
+    final grandTotal = slices.fold<double>(0, (s, e) => s + e.totalAmount);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Where Do You Spend?',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '${slices.length} categories · ${Formatters.currency(grandTotal)} total',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.white54),
+          ),
+          const SizedBox(height: 16),
+
+          // Donut
+          SizedBox(
+            height: 220,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                PieChart(
+                  PieChartData(
+                    pieTouchData: PieTouchData(
+                      touchCallback: (evt, resp) {
+                        setState(() {
+                          if (evt is FlTapUpEvent) {
+                            final idx = resp?.touchedSection
+                                    ?.touchedSectionIndex ??
+                                -1;
+                            _touched = _touched == idx ? -1 : idx;
+                          }
+                        });
+                      },
+                    ),
+                    centerSpaceRadius: 56,
+                    sectionsSpace: 3,
+                    sections: slices.asMap().entries.map((e) {
+                      final i = e.key;
+                      final entry = e.value;
+                      final hit = i == _touched;
+                      final pct = grandTotal > 0
+                          ? entry.totalAmount / grandTotal * 100
+                          : 0;
+                      return PieChartSectionData(
+                        value: entry.totalAmount,
+                        color: _color(entry.category),
+                        radius: hit ? 68.0 : 56.0,
+                        title:
+                            pct >= 5 ? '${pct.toStringAsFixed(0)}%' : '',
+                        titleStyle: TextStyle(
+                          fontSize: hit ? 13 : 11,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          shadows: const [
+                            Shadow(blurRadius: 3, color: Colors.black45)
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                // Center label
+                _touched >= 0 && _touched < slices.length
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            slices[_touched].category,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: _color(slices[_touched].category),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          Text(
+                            Formatters.currency(
+                                slices[_touched].totalAmount),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: _color(slices[_touched].category),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                      )
+                    : Text(
+                        Formatters.currency(grandTotal),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white70,
+                            ),
+                      ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          // Two-column legend
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: slices.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 3.2,
+            ),
+            itemBuilder: (_, i) {
+              final entry = slices[i];
+              final pct =
+                  grandTotal > 0 ? entry.totalAmount / grandTotal : 0.0;
+              final active = _touched == i;
+              return GestureDetector(
+                onTap: () =>
+                    setState(() => _touched = active ? -1 : i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? _color(entry.category).withValues(alpha: 0.16)
+                        : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: active
+                          ? _color(entry.category)
+                          : Colors.transparent,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: _color(entry.category),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              entry.category,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11,
+                                  ),
+                            ),
+                          ),
+                          Text(
+                            '${(pct * 100).toStringAsFixed(0)}%',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontSize: 10,
+                                  color: _color(entry.category),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: LinearProgressIndicator(
+                          value: pct.clamp(0, 1).toDouble(),
+                          minHeight: 3,
+                          backgroundColor: _color(entry.category)
+                              .withValues(alpha: 0.12),
+                          valueColor: AlwaysStoppedAnimation(
+                              _color(entry.category)),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        Formatters.currencyCompact(entry.totalAmount),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(fontSize: 10, color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  3. TOP MERCHANT THIS WEEK
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _TopMerchantCard extends StatelessWidget {
+  final MerchantSpendEntry merchant;
+  const _TopMerchantCard({required this.merchant});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.storefront_rounded,
+                color: AppTheme.warning, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Top Merchant This Week',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white54),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  merchant.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    merchant.category,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                Formatters.currency(merchant.totalAmount),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppTheme.error,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${merchant.transactionCount} txn${merchant.transactionCount == 1 ? '' : 's'}',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.white54),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  4. DAILY SPENDING AVERAGE  (clear summary + mini bar)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _DailyAverageCard extends StatelessWidget {
+  final DailyAverageInsight insight;
+  final WeeklyComparisonInsight weeklyInsight;
+
+  const _DailyAverageCard({
+    required this.insight,
+    required this.weeklyInsight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final peakWd = insight.peakWeekday;
+    final peakLabel =
+        peakWd != null ? DailyAverageInsight.weekdayLabel(peakWd) : null;
+    final peakWdAmount =
+        peakWd != null ? (insight.weekdayAverages[peakWd] ?? 0) : 0.0;
+
+    // Count of this-week transactions
+    final thisWeekTxnCount = weeklyInsight.thisWeekDaily.values
+        .where((v) => v > 0)
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Daily Spending Average',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 14),
+
+          // Key metrics row
+          _KeyMetric(
+            label: 'Average per day',
+            value: Formatters.currency(insight.averagePerDay),
+          ),
+          const SizedBox(height: 8),
+          if (insight.peakDate != null && peakLabel != null)
+            _KeyMetric(
+              label: 'Highest spending day',
+              value:
+                  '$peakLabel – ${Formatters.currency(peakWdAmount)}',
+              highlight: true,
+            ),
+          const SizedBox(height: 8),
+          _KeyMetric(
+            label: 'Active days this week',
+            value: '$thisWeekTxnCount of 7',
+          ),
+
+          // Mini bar chart
+          if (insight.weekdayAverages.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _WeekdayMiniBar(weekdayAverages: insight.weekdayAverages),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _KeyMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool highlight;
+
+  const _KeyMetric({
+    required this.label,
+    required this.value,
+    this.highlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: Colors.white70),
+        ),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: highlight ? AppTheme.error : Colors.white,
+              ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Mon–Sun miniature bar chart.
+class _WeekdayMiniBar extends StatelessWidget {
+  final Map<int, double> weekdayAverages; // 1=Mon … 7=Sun
+  const _WeekdayMiniBar({required this.weekdayAverages});
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final maxVal =
+        weekdayAverages.values.fold<double>(0, (m, v) => v > m ? v : m);
+    final peakWd = weekdayAverages.entries
+        .reduce((a, b) => a.value >= b.value ? a : b)
+        .key;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(7, (i) {
+        final wd = i + 1;
+        final val = weekdayAverages[wd] ?? 0;
+        final frac = maxVal > 0 ? val / maxVal : 0.0;
+        final isWeekend = wd >= 6;
+        final isPeak = wd == peakWd;
+
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(left: i > 0 ? 4 : 0),
+            child: Column(
+              children: [
+                if (isPeak)
+                  Text(
+                    Formatters.currencyCompact(val),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontSize: 9,
+                          color: isWeekend
+                              ? const Color(0xFFFFAB40)
+                              : AppTheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                const SizedBox(height: 2),
+                Container(
+                  height: max(4, 52 * frac),
+                  decoration: BoxDecoration(
+                    color: isWeekend
+                        ? const Color(0xFFFFAB40).withValues(alpha: 0.8)
+                        : AppTheme.primary.withValues(
+                            alpha: isPeak ? 1.0 : 0.6),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  labels[i],
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontSize: 10,
+                        fontWeight:
+                            isPeak ? FontWeight.w700 : FontWeight.normal,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  5. PEAK SPENDING TIME  (text + horizontal bars, no images)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _PeakTimeCard extends StatelessWidget {
+  final TimeOfDayInsight insight;
+  const _PeakTimeCard({required this.insight});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = insight.totalSpent;
+    final peak = insight.peakSession;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Peak Spending Time',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${peak.label} (${peak.timeRange})',
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: AppTheme.primary, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 16),
+          ...SpendingSession.values.map((session) {
+            final amt = insight.sessionTotals[session] ?? 0;
+            final frac = total > 0 ? amt / total : 0.0;
+            final isPeak = session == peak;
+            final barColor = isPeak
+                ? AppTheme.primary
+                : AppTheme.primary.withValues(alpha: 0.25);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${session.label}  ${session.timeRange}',
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontWeight: isPeak
+                                      ? FontWeight.w700
+                                      : FontWeight.w400,
+                                  color:
+                                      isPeak ? Colors.white : Colors.white60,
+                                ),
+                      ),
+                      Text(
+                        Formatters.currency(amt),
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  fontWeight: isPeak
+                                      ? FontWeight.w700
+                                      : FontWeight.w400,
+                                  color: isPeak
+                                      ? AppTheme.primary
+                                      : Colors.white38,
+                                ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: frac,
+                      minHeight: isPeak ? 8 : 5,
+                      backgroundColor: Colors.white.withValues(alpha: 0.06),
+                      valueColor: AlwaysStoppedAnimation(barColor),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  6. WEEKEND VS WEEKDAY  (two large side-by-side bars)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _WeekendVsWeekdayCard extends StatelessWidget {
+  final WeekendVsWeekdayInsight insight;
+  const _WeekendVsWeekdayCard({required this.insight});
+
+  static const _weekdayColor = AppTheme.primary;
+  static const _weekendColor = Color(0xFFFFAB40);
+
+  @override
+  Widget build(BuildContext context) {
+    final moreOnWeekends = insight.spendMoreOnWeekends;
+    final maxAmt = max(insight.weekdayTotal, insight.weekendTotal);
+    final wdFrac = maxAmt > 0 ? insight.weekdayTotal / maxAmt : 0.0;
+    final weFrac = maxAmt > 0 ? insight.weekendTotal / maxAmt : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header + tag
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Weekend vs Weekday',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (moreOnWeekends ? _weekendColor : _weekdayColor)
+                      .withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  moreOnWeekends ? 'Weekend heavy' : 'Weekday heavy',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color:
+                            moreOnWeekends ? _weekendColor : _weekdayColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Amounts
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Weekday: ${Formatters.currency(insight.weekdayTotal)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white70),
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  'Weekend: ${Formatters.currency(insight.weekendTotal)}',
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Two large side-by-side bars
+          SizedBox(
+            height: 140,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Weekday bar
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        Formatters.currencyCompact(insight.weekdayTotal),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: _weekdayColor,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                        height: max(8, 100 * wdFrac),
+                        decoration: BoxDecoration(
+                          color: _weekdayColor,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('Weekdays',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      Text(
+                        '${insight.weekdayTxnCount} txns · ${Formatters.currency(insight.weekdayAvgPerDay)}/day',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(fontSize: 10, color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 24),
+                // Weekend bar
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        Formatters.currencyCompact(insight.weekendTotal),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: _weekendColor,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 400),
+                        curve: Curves.easeOutCubic,
+                        height: max(8, 100 * weFrac),
+                        decoration: BoxDecoration(
+                          color: _weekendColor,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('Weekends',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                      Text(
+                        '${insight.weekendTxnCount} txns · ${Formatters.currency(insight.weekendAvgPerDay)}/day',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(fontSize: 10, color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  7. STATISTICAL INSIGHT CARDS
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _AnalyticsCards extends StatelessWidget {
+  final List<Insight> insights;
+  const _AnalyticsCards({required this.insights});
+
+  @override
+  Widget build(BuildContext context) {
+    if (insights.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Statistical Insights',
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        ...insights.take(5).map((insight) {
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              color: Theme.of(context).colorScheme.surface,
+              border: Border.all(
+                color: Theme.of(context)
+                    .colorScheme
+                    .outline
+                    .withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(insight.icon, style: const TextStyle(fontSize: 18)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        insight.title,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        insight.message,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }

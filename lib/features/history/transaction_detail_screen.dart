@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
 import '../../data/database/app_database.dart';
+import '../../services/merchant_learning_service.dart';
 import '../../state/providers.dart';
 
 /// Full detail view of a single transaction
@@ -333,6 +334,10 @@ class TransactionDetailScreen extends ConsumerWidget {
       case AppConstants.modeContact:
         return 'Contact Payment';
       case AppConstants.modeManual:
+        final method = transaction.upiAppName;
+        if (method != null && method.isNotEmpty) {
+          return 'Manual Entry ($method)';
+        }
         return 'Manual Entry';
       case 'SMS_IMPORT':
         return transaction.direction == 'CREDIT'
@@ -408,6 +413,14 @@ class TransactionDetailScreen extends ConsumerWidget {
           children: [
             Text('Select Category',
                 style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              'Future transactions from the same merchant will use this category automatically.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.grey),
+            ),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
@@ -417,11 +430,38 @@ class TransactionDetailScreen extends ConsumerWidget {
                 return ChoiceChip(
                   label: Text(cat),
                   selected: isSelected,
-                  onSelected: (_) {
-                    ref
-                        .read(databaseProvider)
-                        .updateTransactionCategory(transaction.id, cat);
-                    Navigator.of(context).pop();
+                  onSelected: (_) async {
+                    final db = ref.read(databaseProvider);
+
+                    // 1. Update this transaction's category
+                    await db.updateTransactionCategory(transaction.id, cat);
+
+                    // 2. Persist the merchant → category mapping so future
+                    //    transactions from the same merchant use this category.
+                    await MerchantLearningService.learn(
+                      db,
+                      payeeName: transaction.payeeName,
+                      upiId: transaction.payeeUpiId,
+                      category: cat,
+                    );
+
+                    final merchantKey = MerchantLearningService.normalizeKey(
+                      transaction.payeeName,
+                      transaction.payeeUpiId,
+                    );
+
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Category saved. "$merchantKey" will always be "$cat".',
+                          ),
+                          backgroundColor: AppTheme.success,
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    }
                   },
                 );
               }).toList(),

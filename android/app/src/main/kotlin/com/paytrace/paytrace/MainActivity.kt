@@ -19,6 +19,8 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.paytrace.paytrace/upi"
     private val EVENT_CHANNEL = "com.paytrace.paytrace/notifications"
     private val SMS_PERMISSION_CODE = 2001
+    private val MAX_SMS_SCAN = 1200
+    private val HISTORICAL_WINDOW_MS = 90L * 24 * 60 * 60 * 1000
 
     private var notificationEventSink: EventChannel.EventSink? = null
     private var pendingSmsPermissionResult: MethodChannel.Result? = null
@@ -32,6 +34,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "getUpiApps" -> getUpiApps(result)
                     "launchApp" -> launchApp(call, result)
+                    "launchUpiPayIntent" -> launchUpiPayIntent(call, result)
                     "isAppInstalled" -> isAppInstalled(call, result)
                     "isNotificationAccessEnabled" -> {
                         result.success(PaymentNotificationListener.isEnabled(this))
@@ -205,12 +208,73 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun launchUpiPayIntent(call: MethodCall, result: MethodChannel.Result) {
+        val pa = call.argument<String>("pa")?.trim()
+        val pn = call.argument<String>("pn")?.trim()
+        val am = call.argument<String>("am")?.trim()
+        val tn = call.argument<String>("tn")?.trim()
+        val tr = call.argument<String>("tr")?.trim()
+        val cu = call.argument<String>("cu")?.trim().orEmpty().ifEmpty { "INR" }
+        val packageName = call.argument<String>("package")?.trim()
+
+        if (pa.isNullOrEmpty() || pn.isNullOrEmpty() || am.isNullOrEmpty()) {
+            result.error("INVALID_ARGS", "pa, pn, and am are required", null)
+            return
+        }
+
+        try {
+            val uriBuilder = Uri.Builder()
+                .scheme("upi")
+                .authority("pay")
+                .appendQueryParameter("pa", pa)
+                .appendQueryParameter("pn", pn)
+                .appendQueryParameter("am", am)
+                .appendQueryParameter("cu", cu)
+
+            if (!tn.isNullOrEmpty()) {
+                uriBuilder.appendQueryParameter("tn", tn)
+            }
+            if (!tr.isNullOrEmpty()) {
+                uriBuilder.appendQueryParameter("tr", tr)
+            }
+
+            val uri = uriBuilder.build()
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+
+            if (!packageName.isNullOrEmpty()) {
+                intent.setPackage(packageName)
+            }
+
+            val canHandle = intent.resolveActivity(packageManager) != null
+            if (!canHandle) {
+                if (!packageName.isNullOrEmpty()) {
+                    val fallbackIntent = Intent(Intent.ACTION_VIEW, uri)
+                    if (fallbackIntent.resolveActivity(packageManager) != null) {
+                        startActivity(Intent.createChooser(fallbackIntent, "Pay with"))
+                        result.success(true)
+                        return
+                    }
+                }
+                result.error("UPI_INTENT_UNAVAILABLE", "No app can handle UPI payment intent", null)
+                return
+            }
+
+            if (packageName.isNullOrEmpty()) {
+                startActivity(Intent.createChooser(intent, "Pay with"))
+            } else {
+                startActivity(intent)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("UPI_INTENT_ERROR", e.message, null)
+        }
+    }
+
     /**
-     * Read recent SMS from inbox via ContentResolver.
-     * NO FILTERING on the native side — sends ALL SMS received after
-     * [sinceTimestamp] to Dart. The Dart-side matchesPending() handles
-     * precise amount matching. This ensures we never miss a bank SMS
-     * due to unknown sender IDs or unexpected message formats.
+     * Read historical SMS from both inbox + sent via ContentResolver.
+     *
+     * Native side performs only basic extraction (address/body/date/type)
+     * and time-window bounds. Semantic filtering/classification happens in Dart.
      */
     private fun readRecentSms(sinceTimestamp: Long, result: MethodChannel.Result) {
         try {
@@ -225,47 +289,75 @@ class MainActivity : FlutterActivity() {
                 return
             }
 
-            Log.d("PayTrace", "readRecentSms: permission OK, querying since $sinceTimestamp")
+            val minTimestamp = maxOf(
+                sinceTimestamp,
+                System.currentTimeMillis() - HISTORICAL_WINDOW_MS,
+            )
+            Log.d("PayTrace", "readRecentSms: permission OK, querying since $minTimestamp")
 
-            val uri = Telephony.Sms.Inbox.CONTENT_URI
             val projection = arrayOf(
                 Telephony.Sms.ADDRESS,
                 Telephony.Sms.BODY,
                 Telephony.Sms.DATE,
+                Telephony.Sms.TYPE,
             )
             val selection = "${Telephony.Sms.DATE} > ?"
-            val selectionArgs = arrayOf(sinceTimestamp.toString())
+            val selectionArgs = arrayOf(minTimestamp.toString())
             val sortOrder = "${Telephony.Sms.DATE} DESC"
-
-            val cursor: Cursor? = contentResolver.query(
-                uri, projection, selection, selectionArgs, sortOrder
-            )
 
             val smsList = mutableListOf<Map<String, String>>()
 
-            cursor?.use {
-                val addressIdx = it.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
-                val bodyIdx = it.getColumnIndexOrThrow(Telephony.Sms.BODY)
-                val dateIdx = it.getColumnIndexOrThrow(Telephony.Sms.DATE)
+            fun collectFrom(uri: Uri, fallbackType: String) {
+                val cursor: Cursor? = contentResolver.query(
+                    uri,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    sortOrder,
+                )
 
-                var count = 0
-                while (it.moveToNext() && count < 50) {
-                    val sender = it.getString(addressIdx) ?: ""
-                    val body = it.getString(bodyIdx) ?: ""
-                    val timestamp = it.getLong(dateIdx)
+                cursor?.use {
+                    val addressIdx = it.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
+                    val bodyIdx = it.getColumnIndexOrThrow(Telephony.Sms.BODY)
+                    val dateIdx = it.getColumnIndexOrThrow(Telephony.Sms.DATE)
+                    val typeIdx = it.getColumnIndexOrThrow(Telephony.Sms.TYPE)
 
-                    Log.d("PayTrace", "SMS[$count] from=$sender body=${body.take(80)}")
-                    smsList.add(mapOf(
-                        "sender" to sender,
-                        "body" to body,
-                        "timestamp" to timestamp.toString()
-                    ))
-                    count++
+                    while (it.moveToNext()) {
+                        if (smsList.size >= MAX_SMS_SCAN) break
+
+                        val sender = it.getString(addressIdx) ?: ""
+                        val body = it.getString(bodyIdx) ?: ""
+                        val timestamp = it.getLong(dateIdx)
+                        val rawType = it.getInt(typeIdx)
+                        val smsType = when (rawType) {
+                            Telephony.Sms.MESSAGE_TYPE_SENT -> "sent"
+                            Telephony.Sms.MESSAGE_TYPE_INBOX -> "inbox"
+                            else -> fallbackType
+                        }
+
+                        smsList.add(
+                            mapOf(
+                                "sender" to sender,
+                                "body" to body,
+                                "timestamp" to timestamp.toString(),
+                                "type" to smsType,
+                            )
+                        )
+                    }
                 }
             }
 
-            Log.d("PayTrace", "readRecentSms: returning ${smsList.size} SMS to Dart")
-            result.success(smsList)
+            collectFrom(Telephony.Sms.Inbox.CONTENT_URI, "inbox")
+            if (smsList.size < MAX_SMS_SCAN) {
+                collectFrom(Telephony.Sms.Sent.CONTENT_URI, "sent")
+            }
+
+            val sorted = smsList
+                .sortedByDescending { it["timestamp"]?.toLongOrNull() ?: 0L }
+                .take(MAX_SMS_SCAN)
+
+            Log.d("PayTrace", "readRecentSms: returning ${sorted.size} SMS to Dart")
+            result.success(sorted)
 
         } catch (e: Exception) {
             Log.e("PayTrace", "readRecentSms error: ${e.message}")

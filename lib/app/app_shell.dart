@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../features/home/home_screen.dart';
+import '../core/theme/app_theme.dart';
+import '../services/daily_spending_summary_service.dart';
 import '../features/history/history_screen.dart';
+import '../features/history/manual_expense_entry_screen.dart';
+import '../features/home/home_screen.dart';
 import '../features/insights/insights_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/summary/daily_summary_screen.dart';
 
-/// Main app shell with bottom navigation
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -16,7 +19,28 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _currentIndex = 0;
 
-  final _screens = const [
+  @override
+  void initState() {
+    super.initState();
+    DailySpendingSummaryService.initializeNotificationsForApp(
+      onDailySummaryTap: _openDailySummary,
+    ).then((launchedFromNotification) {
+      if (launchedFromNotification && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openDailySummary();
+        });
+      }
+    });
+    DailySpendingSummaryService.initializeAndSchedule();
+  }
+
+  void _openDailySummary() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const DailySummaryScreen()),
+    );
+  }
+
+  static const _screens = [
     HomeScreen(),
     HistoryScreen(),
     InsightsScreen(),
@@ -26,13 +50,38 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
+      body: SafeArea(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 280),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: KeyedSubtree(
+            key: ValueKey(_currentIndex),
+            child: _screens[_currentIndex],
+          ),
+        ),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const ManualExpenseEntryScreen(),
+            ),
+          );
+        },
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Add Expense'),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (i) => setState(() => _currentIndex = i),
+        onDestinationSelected: (index) {
+          setState(() => _currentIndex = index);
+        },
+        height: 70,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),

@@ -5,10 +5,11 @@ import '../../core/constants/app_constants.dart';
 import 'tables/transactions.dart';
 import 'tables/payees.dart';
 import 'tables/budgets.dart';
+import 'tables/merchant_categories.dart';
 
 part 'app_database.g.dart';
 
-@DriftDatabase(tables: [Transactions, Payees, Budgets])
+@DriftDatabase(tables: [Transactions, Payees, Budgets, MerchantCategories])
 class AppDatabase extends _$AppDatabase {
   AppDatabase()
       : super(driftDatabase(
@@ -23,7 +24,7 @@ class AppDatabase extends _$AppDatabase {
 
   // Bump this when schema changes
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -55,6 +56,21 @@ class AppDatabase extends _$AppDatabase {
             await m.database.customStatement(
               'CREATE INDEX IF NOT EXISTS idx_payee_upi ON payees(upi_id)',
             );
+          }
+          if (from < 5) {
+            // Add category + lastTransactionAt to payees
+            try {
+              await m.database.customStatement(
+                'ALTER TABLE payees ADD COLUMN category TEXT',
+              );
+            } catch (_) {}
+            try {
+              await m.database.customStatement(
+                'ALTER TABLE payees ADD COLUMN last_transaction_at INTEGER',
+              );
+            } catch (_) {}
+            // Create merchant-category learning table
+            await m.createTable(merchantCategories);
           }
         },
       );
@@ -478,6 +494,47 @@ class AppDatabase extends _$AppDatabase {
     }
     return results;
   }
+
+  // ═══════════════════════════════════════════
+  //  MERCHANT LEARNING QUERIES
+  // ═══════════════════════════════════════════
+
+  /// Look up the learned category for a merchant key.
+  /// Returns null if no mapping has been stored yet.
+  Future<String?> getMerchantCategory(String key) async {
+    final row = await (select(merchantCategories)
+          ..where((m) => m.merchantKey.equals(key)))
+        .getSingleOrNull();
+    return row?.category;
+  }
+
+  /// Insert or update a merchant-category mapping.
+  Future<void> upsertMerchantCategory(String key, String category) =>
+      into(merchantCategories).insertOnConflictUpdate(
+        MerchantCategoriesCompanion(
+          merchantKey: Value(key),
+          category: Value(category),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
+  /// Delete a merchant-category mapping (for user resets).
+  Future<void> deleteMerchantCategory(String key) =>
+      (delete(merchantCategories)
+            ..where((m) => m.merchantKey.equals(key)))
+          .go();
+
+  /// Return all stored merchant-category mappings (for a settings view).
+  Future<List<MerchantCategory>> getAllMerchantCategories() =>
+      (select(merchantCategories)
+            ..orderBy([(m) => OrderingTerm.asc(m.merchantKey)]))
+          .get();
+
+  /// Watch all merchant-category mappings reactively.
+  Stream<List<MerchantCategory>> watchAllMerchantCategories() =>
+      (select(merchantCategories)
+            ..orderBy([(m) => OrderingTerm.asc(m.merchantKey)]))
+          .watch();
 }
 
 

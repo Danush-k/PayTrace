@@ -47,6 +47,7 @@ class AppConstants {
     'Education',
     'Rent',
     'Transfer',
+    'Income',
     'Others',
   ];
 }

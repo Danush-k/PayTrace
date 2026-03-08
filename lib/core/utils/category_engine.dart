@@ -112,6 +112,7 @@ class CategoryEngine {
     'Education': '📚',
     'Rent': '🏠',
     'Transfer': '💸',
+    'Income': '💰',
     'Others': '📋',
   };
 }

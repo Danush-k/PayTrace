@@ -70,7 +70,6 @@ build/
 **/macos/Flutter/GeneratedPluginRegistrant.swift
 
 # Web
-lib/generated_plugin_registrant.dart
 
 # IDE
 .idea/

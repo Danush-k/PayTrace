@@ -16,6 +16,7 @@ import '../../services/sms_service.dart';
 import 'app_picker_sheet.dart';
 import 'contact_picker_sheet.dart';
 import 'payment_status_screen.dart';
+import 'payment_sheet_screen.dart';
 import 'qr_scan_screen.dart';
 
 /// Main payment screen — handles all three flows:
@@ -69,6 +70,7 @@ class _PayScreenState extends ConsumerState<PayScreen>
   bool _detailsConfirmed = false; // After user hits "Proceed"
   PayeeType _payeeType = PayeeType.unknown;
   StreamSubscription<PaymentNotification>? _notificationSub;
+  StreamSubscription<BankSms>? _smsSub;
   bool _autoConfirmed = false; // Prevent double-confirm
   DateTime? _paymentLaunchedAt; // When user opened UPI app
   bool _isPolling = false; // Prevent concurrent polls
@@ -187,6 +189,7 @@ class _PayScreenState extends ConsumerState<PayScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notificationSub?.cancel();
+    _smsSub?.cancel();
     _autoDetectTimer?.cancel();
     _countdownUiTimer?.cancel();
     _upiIdController.dispose();
@@ -375,7 +378,10 @@ class _PayScreenState extends ConsumerState<PayScreen>
     // Ensure SMS permission is granted for auto-detection
     final hasPerm = await SmsService.hasSmsPermission();
     if (!hasPerm) {
-      await SmsService.requestSmsPermission();
+      final granted = await SmsService.requestSmsPermission();
+      if (granted) {
+        ref.invalidate(smsSyncProvider);
+      }
     }
 
     // Start listening for notifications as soon as Copy & Pay view shows
@@ -596,7 +602,10 @@ class _PayScreenState extends ConsumerState<PayScreen>
               : 'SMS permission: ❌ DENIED — go to Settings';
         });
         // If permission was just granted, restart polling
-        if (granted && !_isPolling) _pollSmsInbox();
+        if (granted) {
+          ref.invalidate(smsSyncProvider);
+          if (!_isPolling) _pollSmsInbox();
+        }
       }
     } else {
       setState(() => _debugStatus = 'SMS permission: ✅ Scanning...');
@@ -1119,7 +1128,8 @@ class _PayScreenState extends ConsumerState<PayScreen>
                     if (qrData != null && mounted) {
                       Navigator.of(context).pushReplacement(
                         MaterialPageRoute(
-                            builder: (_) => PayScreen(qrData: qrData)),
+                          builder: (_) => PaymentSheetScreen(qrData: qrData),
+                        ),
                       );
                     }
                   },
