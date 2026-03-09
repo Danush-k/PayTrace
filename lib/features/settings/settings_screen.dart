@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -167,6 +168,40 @@ class SettingsScreen extends ConsumerWidget {
           child: Column(
             children: [
               _Tile(
+                icon: Icons.security_rounded,
+                title: 'App Lock',
+                subtitle: 'Require biometric or PIN',
+                trailing: Switch(
+                  value: false,
+                  onChanged: (val) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('App Lock coming soon')),
+                    );
+                  },
+                ),
+              ),
+              Divider(
+                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                height: 1,
+              ),
+              _Tile(
+                icon: Icons.build_circle_outlined,
+                title: 'Manage Permissions',
+                subtitle: 'SMS and Notification access',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  const MethodChannel('com.paytrace.paytrace/upi')
+                      .invokeMethod('openAppSettings');
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _Card(
+          child: Column(
+            children: [
+              _Tile(
                 icon: Icons.file_download_outlined,
                 title: 'Export transactions',
                 subtitle: 'Generate CSV',
@@ -182,6 +217,76 @@ class SettingsScreen extends ConsumerWidget {
                       behavior: SnackBarBehavior.floating,
                       backgroundColor: AppTheme.success,
                     ),
+                  );
+                },
+              ),
+              Divider(
+                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.15),
+                height: 1,
+              ),
+              _Tile(
+                icon: Icons.delete_forever_outlined,
+                title: 'Clear Data',
+                subtitle: 'Erase all transactions & settings',
+                trailing: const SizedBox.shrink(),
+                onTap: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Clear All Data?'),
+                      content: const Text(
+                        'This will permanently delete all your transactions, budgets, and settings. This action cannot be undone.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppTheme.error,
+                          ),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirm == true) {
+                    final db = ref.read(databaseProvider);
+                    await db.clearAllData();
+                    ref.invalidate(allTransactionsProvider);
+                    ref.invalidate(recentTransactionsProvider);
+                    ref.invalidate(dailySpendingProvider);
+                    ref.invalidate(monthlyBudgetProvider);
+                    ref.invalidate(monthlySpendingProvider);
+                    ref.invalidate(monthlyReceivedProvider);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('All data has been cleared'),
+                          backgroundColor: AppTheme.error,
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _Card(
+          child: Column(
+            children: [
+              _Tile(
+                icon: Icons.help_outline_rounded,
+                title: 'Help & Support',
+                subtitle: 'Contact us for issues',
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Contact support@paytrace.app')),
                   );
                 },
               ),

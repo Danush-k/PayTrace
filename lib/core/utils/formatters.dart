@@ -22,7 +22,7 @@ class Formatters {
 
   /// Format amount as ₹1.2K, ₹3.4L etc.
   static String currencyCompact(double amount) =>
-      _compactCurrencyFormat.format(amount);
+      _compactCurrencyFormat.format(amount).replaceAll('T', 'K');
 
   /// Format amount without symbol: 1,234.56
   static String amountOnly(double amount) =>
