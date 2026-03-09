@@ -59,11 +59,6 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => setState(() => _searchController.clear()),
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Clear search',
-                  ),
                 ],
               ),
               const SizedBox(height: 8),

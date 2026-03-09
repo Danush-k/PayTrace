@@ -32,7 +32,7 @@ Future<bool> isOnboardingComplete() async {
 //  Progress messages shown during the scan
 // ─────────────────────────────────────────────────────────────────────────────
 const _kProgressMessages = [
-  (Icons.sms_rounded, 'Scanning messages...'),
+  (Icons.sync_rounded, 'Preparing transaction history...'),
   (Icons.manage_search_rounded, 'Detecting transactions...'),
   (Icons.bar_chart_rounded, 'Analyzing spending patterns...'),
 ];
@@ -44,8 +44,8 @@ const _kProgressMessages = [
 /// Displayed immediately after permissions are granted.
 ///
 /// Responsibilities:
-///  1. Runs [HistoricalSmsScannerService.scanHistorical] to scan the
-///     last 90 days of SMS from both inbox and sent folders.
+///  1. Runs [HistoricalSmsScannerService.scanHistorical] to import any
+///     available message-based transaction history when permission exists.
 ///  2. Cycles through 3 friendly progress messages driven by the actual
 ///     [ScanPhase] reported by the scanner.
 ///  3. Writes the [_kOnboardingComplete] flag to secure storage.
@@ -100,7 +100,7 @@ class _ScanningScreenState extends ConsumerState<ScanningScreen> {
   static int _phaseToIndex(ScanPhase phase) {
     switch (phase) {
       case ScanPhase.fetching:
-        return 0; // "Scanning messages…"
+        return 0; // "Preparing transaction history…"
       case ScanPhase.filtering:
       case ScanPhase.parsing:
         return 1; // "Detecting transactions…"

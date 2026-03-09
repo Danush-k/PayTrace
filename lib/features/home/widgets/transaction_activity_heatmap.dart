@@ -216,6 +216,27 @@ class _TransactionActivityHeatmapState
                 accent: Theme.of(context).colorScheme.primary,
                 icon: Icons.receipt_long_rounded,
               ),
+              if (stats.categories.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'Categories',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: stats.categories.map((cat) {
+                    return Chip(
+                      label: Text(cat),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    );
+                  }).toList(),
+                ),
+              ],
             ],
           ),
         );
@@ -345,7 +366,7 @@ class _HeatmapMonthContent extends StatelessWidget {
             Text(
               'Spending heatmap',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF0F9D88),
+                    color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.w700,
                   ),
             ),
@@ -388,38 +409,44 @@ class _HeatmapDayCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final value = stats.spent;
     final intensity = maxValue <= 0 ? 0.0 : (value / maxValue).clamp(0.0, 1.0);
-    final fillColor = _heatColorForIntensity(
-      context: context,
+    final brightness = Theme.of(context).brightness;
+    final fillColor = heatColorForIntensity(
+      brightness: brightness,
       intensity: intensity,
       hasSpending: value > 0,
     );
+    final selectedBorderColor = brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.7)
+        : Colors.black.withValues(alpha: 0.5);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
+        splashColor: fillColor.withValues(alpha: 0.3),
+        highlightColor: fillColor.withValues(alpha: 0.15),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
             color: fillColor,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isSelected
-                  ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.22)
-                  : fillColor.withValues(alpha: 0.85),
-              width: isSelected ? 1.5 : 0.8,
+                  ? selectedBorderColor
+                  : Colors.transparent,
+              width: isSelected ? 2.0 : 1.0,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF0B7A68).withValues(
-                  alpha: value > 0 ? 0.12 : 0.03,
-                ),
-                blurRadius: value > 0 ? 12 : 6,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: fillColor.withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : [],
           ),
           child: Stack(
             children: [
@@ -431,7 +458,9 @@ class _HeatmapDayCell extends StatelessWidget {
                     '${date.day}',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: value > 0
-                              ? Colors.white.withValues(alpha: 0.92)
+                              ? (intensity > 0.4
+                                  ? Colors.white.withValues(alpha: 0.95)
+                                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))
                               : Theme.of(context)
                                   .colorScheme
                                   .onSurface
@@ -450,7 +479,9 @@ class _HeatmapDayCell extends StatelessWidget {
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.88),
+                        color: intensity > 0.4
+                            ? Colors.white.withValues(alpha: 0.88)
+                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(999),
                       ),
                     ),
@@ -463,25 +494,35 @@ class _HeatmapDayCell extends StatelessWidget {
     );
   }
 
-  Color _heatColorForIntensity({
-    required BuildContext context,
+  /// Multi-color intensity scale:
+  /// Very Low → Light Green (#E8F5E9)
+  /// Low → Green (#81C784)
+  /// Medium → Yellow (#FFD54F)
+  /// High → Orange (#FF8A65)
+  /// Very High → Red (#E53935)
+  static Color heatColorForIntensity({
+    required Brightness brightness,
     required double intensity,
     required bool hasSpending,
   }) {
-    final baseColor = Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF182829)
-        : const Color(0xFFE8F8F3);
-    final targetColor = Color.lerp(
-          const Color(0xFF9FE7D6),
-          const Color(0xFF047857),
-          intensity,
-        ) ??
-        const Color(0xFF047857);
-    if (!hasSpending) {
-      return baseColor;
-    }
-    return Color.lerp(baseColor, targetColor, 0.28 + (intensity * 0.72)) ??
-        targetColor;
+    final baseColor = brightness == Brightness.dark
+        ? const Color(0xFF1E1E2C)
+        : const Color(0xFFF3F4F6);
+    if (!hasSpending) return baseColor;
+
+    const stops = [
+      Color(0xFFE8F5E9), // very low
+      Color(0xFF81C784), // low
+      Color(0xFFFFD54F), // medium
+      Color(0xFFFF8A65), // high
+      Color(0xFFE53935), // very high
+    ];
+
+    final t = intensity.clamp(0.0, 1.0);
+    final segment = t * (stops.length - 1);
+    final idx = segment.floor().clamp(0, stops.length - 2);
+    final local = segment - idx;
+    return Color.lerp(stops[idx], stops[idx + 1], local) ?? stops.last;
   }
 }
 
@@ -490,33 +531,38 @@ class _HeatmapLegend extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
     return Row(
       children: [
         Text(
-          'Less spend',
-          style: Theme.of(context).textTheme.bodySmall,
+          'Less Spend',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
         ),
-        const SizedBox(width: 10),
-        for (final intensity in const [0.15, 0.35, 0.55, 0.75, 1.0])
+        const SizedBox(width: 8),
+        for (final intensity in const [0.0, 0.25, 0.5, 0.75, 1.0])
           Padding(
-            padding: const EdgeInsets.only(right: 6),
+            padding: const EdgeInsets.only(right: 4),
             child: Container(
-              width: 14,
-              height: 14,
+              width: 16,
+              height: 16,
               decoration: BoxDecoration(
-                color: Color.lerp(
-                  const Color(0xFFE8F8F3),
-                  const Color(0xFF047857),
-                  intensity,
+                color: _HeatmapDayCell.heatColorForIntensity(
+                  brightness: brightness,
+                  intensity: intensity,
+                  hasSpending: true,
                 ),
-                borderRadius: BorderRadius.circular(5),
+                borderRadius: BorderRadius.circular(4),
               ),
             ),
           ),
         const Spacer(),
         Text(
-          'More',
-          style: Theme.of(context).textTheme.bodySmall,
+          'More Spend',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
         ),
       ],
     );
@@ -631,25 +677,31 @@ class _HeatmapDayStats {
     required this.spent,
     required this.income,
     required this.count,
+    this.categories = const {},
   });
 
   const _HeatmapDayStats.empty()
       : spent = 0,
         income = 0,
-        count = 0;
+        count = 0,
+        categories = const {};
 
   final double spent;
   final double income;
   final int count;
+  final Set<String> categories;
 
   double get totalActivity => spent + income;
 
   _HeatmapDayStats add(Transaction txn) {
     final isCredit = txn.direction.toUpperCase() == 'CREDIT';
+    final newCategories = {...categories};
+    if (txn.category.isNotEmpty) newCategories.add(txn.category);
     return _HeatmapDayStats(
       spent: spent + (isCredit ? 0 : txn.amount),
       income: income + (isCredit ? txn.amount : 0),
       count: count + 1,
+      categories: newCategories,
     );
   }
 }

@@ -1,38 +1,9 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/theme/app_theme.dart';
 import 'scanning_screen.dart';
-
-enum _PermissionStep {
-  restrictedSettings,
-  sms,
-  notifications,
-}
-
-class _AppSettingsHelper {
-  static const _channel = MethodChannel('com.paytrace.paytrace/upi');
-
-  static Future<void> openAppSettings() async {
-    if (kIsWeb) return;
-    try {
-      await _channel.invokeMethod('openAppSettings');
-    } on PlatformException {
-      // fallback
-    }
-  }
-
-  static Future<bool> hasSmsPermission() async {
-    if (kIsWeb) return true;
-    try {
-      return await _channel.invokeMethod<bool>('hasSmsPermission') ?? false;
-    } on PlatformException {
-      return false;
-    }
-  }
-}
 
 class _NotifListenerHelper {
   static const _channel = MethodChannel('com.paytrace.paytrace/upi');
@@ -65,14 +36,10 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen>
-    with WidgetsBindingObserver {
-  _PermissionStep _step = _PermissionStep.restrictedSettings;
-
+  with WidgetsBindingObserver {
   bool _isBusy = false;
   bool _waitingNotificationReturn = false;
-  bool _waitingAppSettingsReturn = false;
 
-  String? _smsMessage;
   String? _notificationMessage;
 
   @override
@@ -90,76 +57,11 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (_waitingAppSettingsReturn) {
-        _waitingAppSettingsReturn = false;
-        _checkAfterAppSettings();
-      } else if (_waitingNotificationReturn) {
+      if (_waitingNotificationReturn) {
         _waitingNotificationReturn = false;
         _checkNotificationAndProceed();
       }
     }
-  }
-
-  Future<void> _openAppSettingsForRestricted() async {
-    if (_isBusy) return;
-    setState(() => _isBusy = true);
-
-    _waitingAppSettingsReturn = true;
-    await _AppSettingsHelper.openAppSettings();
-
-    if (!mounted) return;
-    setState(() => _isBusy = false);
-  }
-
-  Future<void> _checkAfterAppSettings() async {
-    // Move to SMS step regardless — user may or may not have toggled it
-    setState(() {
-      _step = _PermissionStep.sms;
-    });
-  }
-
-  void _skipRestrictedStep() {
-    setState(() {
-      _step = _PermissionStep.sms;
-    });
-  }
-
-  Future<void> _requestSmsPermission() async {
-    if (_isBusy) return;
-    setState(() {
-      _isBusy = true;
-      _smsMessage = null;
-    });
-
-    if (kIsWeb) {
-      setState(() {
-        _isBusy = false;
-        _step = _PermissionStep.notifications;
-      });
-      return;
-    }
-
-    final status = await Permission.sms.request();
-
-    if (!mounted) return;
-
-    if (status.isGranted) {
-      setState(() {
-        _isBusy = false;
-        _step = _PermissionStep.notifications;
-      });
-      return;
-    }
-
-    setState(() {
-      _isBusy = false;
-      _smsMessage =
-          'SMS access helps automatic transaction detection. You can continue, but tracking will be limited until permission is enabled.';
-    });
-  }
-
-  void _skipSmsStep() {
-    _proceedToScanning();
   }
 
   Future<void> _enableNotifications() async {
@@ -220,29 +122,15 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_step == _PermissionStep.restrictedSettings)
-                      _RestrictedSettingsCard(
-                        isBusy: _isBusy,
-                        onOpenSettings: _openAppSettingsForRestricted,
-                        onSkip: _skipRestrictedStep,
-                      )
-                    else if (_step == _PermissionStep.sms)
-                      _SmsPermissionCard(
-                        isBusy: _isBusy,
-                        message: _smsMessage,
-                        onAllow: _requestSmsPermission,
-                        onNotNow: _skipSmsStep,
-                      )
-                    else
-                      _NotificationPermissionCard(
-                        isBusy: _isBusy,
-                        message: _notificationMessage,
-                        onEnable: _enableNotifications,
-                        onNotNow: _skipNotificationStep,
-                      ),
+                    _NotificationPermissionCard(
+                      isBusy: _isBusy,
+                      message: _notificationMessage,
+                      onEnable: _enableNotifications,
+                      onNotNow: _skipNotificationStep,
+                    ),
                     const SizedBox(height: 14),
                     Text(
-                      'This app analyzes your bank SMS and payment notifications to automatically detect transactions and generate spending insights.',
+                      'Notification access helps PayTrace detect payments instantly. SMS access is still available later from Settings when you want message-based transaction import.',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -256,64 +144,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           ),
         ],
       ),
-    );
-  }
-}
-
-class _RestrictedSettingsCard extends StatelessWidget {
-  final bool isBusy;
-  final VoidCallback onOpenSettings;
-  final VoidCallback onSkip;
-
-  const _RestrictedSettingsCard({
-    required this.isBusy,
-    required this.onOpenSettings,
-    required this.onSkip,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _PermissionCard(
-      title: 'Allow Restricted Settings',
-      description:
-          'Google Play Protect may block SMS access. To fix this, open App Settings → tap ⋮ (3-dot menu) → "Allow restricted settings". This lets PayTrace read your bank messages.',
-      primaryLabel: 'Open App Settings',
-      secondaryLabel: 'Skip',
-      icon: Icons.security_rounded,
-      message: null,
-      isBusy: isBusy,
-      onPrimary: onOpenSettings,
-      onSecondary: onSkip,
-    );
-  }
-}
-
-class _SmsPermissionCard extends StatelessWidget {
-  final bool isBusy;
-  final String? message;
-  final VoidCallback onAllow;
-  final VoidCallback onNotNow;
-
-  const _SmsPermissionCard({
-    required this.isBusy,
-    required this.message,
-    required this.onAllow,
-    required this.onNotNow,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _PermissionCard(
-      title: '"PayTrace" wants SMS access',
-      description:
-          'We scan bank transaction messages to automatically track your expenses. Your personal messages are never stored.',
-      primaryLabel: 'Allow',
-      secondaryLabel: 'Don’t Allow',
-      icon: Icons.sms_rounded,
-      message: message,
-      isBusy: isBusy,
-      onPrimary: onAllow,
-      onSecondary: onNotNow,
     );
   }
 }

@@ -329,7 +329,9 @@ class _DailySpendChart extends StatelessWidget {
                       drawVerticalLine: false,
                       horizontalInterval: maxY / 4,
                       getDrawingHorizontalLine: (_) => FlLine(
-                        color: Colors.white.withValues(alpha: 0.06),
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : Colors.black.withValues(alpha: 0.08),
                         strokeWidth: 1,
                       ),
                     ),
@@ -350,7 +352,9 @@ class _DailySpendChart extends StatelessWidget {
                           getTitlesWidget: (value, _) {
                             return Text(
                               value.toInt().toString(),
-                              style: Theme.of(context).textTheme.bodySmall,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                                  ),
                             );
                           },
                         ),
@@ -362,10 +366,14 @@ class _DailySpendChart extends StatelessWidget {
                         spots: spots,
                         isCurved: true,
                         barWidth: 3,
-                        color: AppTheme.primary,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? AppTheme.primary
+                            : AppTheme.primaryDark,
                         belowBarData: BarAreaData(
                           show: true,
-                          color: AppTheme.primary.withValues(alpha: 0.14),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? AppTheme.primary.withValues(alpha: 0.14)
+                              : AppTheme.primaryDark.withValues(alpha: 0.18),
                         ),
                         dotData: const FlDotData(show: false),
                       ),

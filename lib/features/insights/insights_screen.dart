@@ -124,7 +124,11 @@ class InsightsScreen extends ConsumerWidget {
               style: Theme.of(context)
                   .textTheme
                   .bodyMedium
-                  ?.copyWith(color: Colors.white54),
+              ?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface.withValues(
+                  alpha: 0.68,
+                ),
+              ),
             ),
             const SizedBox(height: 20),
 
@@ -195,11 +199,28 @@ class _DailySpendingBarCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxY = insight.maxDailyValue;
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final subtitleColor = colorScheme.onSurface.withValues(
+      alpha: isDark ? 0.68 : 0.72,
+    );
+    final weekdayLabelColor = colorScheme.onSurface.withValues(
+      alpha: isDark ? 0.62 : 0.74,
+    );
+    final gridColor = colorScheme.onSurface.withValues(
+      alpha: isDark ? 0.08 : 0.12,
+    );
+    final backgroundBarColor = colorScheme.onSurface.withValues(
+      alpha: isDark ? 0.05 : 0.08,
+    );
+    final tooltipBackgroundColor = isDark
+        ? const Color(0xFF1E1E2C)
+        : colorScheme.surfaceContainerHighest;
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -218,7 +239,7 @@ class _DailySpendingBarCard extends StatelessWidget {
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: Colors.white54),
+                ?.copyWith(color: subtitleColor),
           ),
           const SizedBox(height: 16),
           SizedBox(
@@ -228,8 +249,7 @@ class _DailySpendingBarCard extends StatelessWidget {
                 maxY: max(1, maxY * 1.25),
                 barTouchData: BarTouchData(
                   touchTooltipData: BarTouchTooltipData(
-                    getTooltipColor: (_) =>
-                        const Color(0xFF1E1E2C),
+                    getTooltipColor: (_) => tooltipBackgroundColor,
                     getTooltipItem: (group, gI, rod, rI) {
                       final idx = group.x;
                       return BarTooltipItem(
@@ -248,7 +268,7 @@ class _DailySpendingBarCard extends StatelessWidget {
                   drawVerticalLine: false,
                   horizontalInterval: max(1, maxY / 4),
                   getDrawingHorizontalLine: (_) => FlLine(
-                    color: Colors.white.withValues(alpha: 0.06),
+                    color: gridColor,
                     strokeWidth: 1,
                   ),
                 ),
@@ -276,7 +296,7 @@ class _DailySpendingBarCard extends StatelessWidget {
                                   fontWeight: FontWeight.w600,
                                   color: i >= 5
                                       ? _weekendColor
-                                      : Colors.white60,
+                                      : weekdayLabelColor,
                                 ),
                           ),
                         );
@@ -300,7 +320,7 @@ class _DailySpendingBarCard extends StatelessWidget {
                         backDrawRodData: BackgroundBarChartRodData(
                           show: true,
                           toY: max(1, maxY * 1.25),
-                          color: Colors.white.withValues(alpha: 0.03),
+                          color: backgroundBarColor,
                         ),
                       ),
                     ],
@@ -311,11 +331,11 @@ class _DailySpendingBarCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           // Legend row
-          Row(
+          const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _LegendDot(color: _weekdayColor, label: 'Weekday'),
-              const SizedBox(width: 20),
+              SizedBox(width: 20),
               _LegendDot(color: _weekendColor, label: 'Weekend'),
             ],
           ),
@@ -346,7 +366,14 @@ class _LegendDot extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .bodySmall
-              ?.copyWith(color: Colors.white54, fontSize: 11),
+              ?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface.withValues(
+                      alpha: Theme.of(context).brightness == Brightness.dark
+                          ? 0.68
+                          : 0.72,
+                    ),
+                fontSize: 11,
+              ),
         ),
       ],
     );
@@ -383,6 +410,10 @@ class _CategoryPieCardState extends State<_CategoryPieCard> {
   @override
   Widget build(BuildContext context) {
     if (widget.insight.entries.isEmpty) return const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
+    final mutedTextColor = colorScheme.onSurface.withValues(alpha: 0.68);
+    final secondaryTextColor = colorScheme.onSurface.withValues(alpha: 0.74);
+    final inactiveLegendColor = colorScheme.surfaceContainerHighest;
 
     final sorted = [...widget.insight.entries]
       ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
@@ -430,7 +461,7 @@ class _CategoryPieCardState extends State<_CategoryPieCard> {
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
-                ?.copyWith(color: Colors.white54),
+                ?.copyWith(color: mutedTextColor),
           ),
           const SizedBox(height: 16),
 
@@ -516,7 +547,7 @@ class _CategoryPieCardState extends State<_CategoryPieCard> {
                             .titleSmall
                             ?.copyWith(
                               fontWeight: FontWeight.w800,
-                              color: Colors.white70,
+                              color: secondaryTextColor,
                             ),
                       ),
               ],
@@ -551,7 +582,7 @@ class _CategoryPieCardState extends State<_CategoryPieCard> {
                   decoration: BoxDecoration(
                     color: active
                         ? _color(entry.category).withValues(alpha: 0.16)
-                        : Colors.white.withValues(alpha: 0.04),
+                        : inactiveLegendColor,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: active
@@ -619,7 +650,7 @@ class _CategoryPieCardState extends State<_CategoryPieCard> {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(fontSize: 10, color: Colors.white54),
+                            ?.copyWith(fontSize: 10, color: mutedTextColor),
                       ),
                     ],
                   ),
@@ -643,6 +674,10 @@ class _TopMerchantCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedTextColor = Theme.of(context).colorScheme.onSurface.withValues(
+      alpha: 0.68,
+    );
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -658,8 +693,11 @@ class _TopMerchantCard extends StatelessWidget {
               color: AppTheme.warning.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(Icons.storefront_rounded,
-                color: AppTheme.warning, size: 22),
+            child: const Icon(
+              Icons.storefront_rounded,
+              color: AppTheme.warning,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -671,7 +709,7 @@ class _TopMerchantCard extends StatelessWidget {
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
-                      ?.copyWith(color: Colors.white54),
+                      ?.copyWith(color: mutedTextColor),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -718,7 +756,7 @@ class _TopMerchantCard extends StatelessWidget {
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
-                    ?.copyWith(color: Colors.white54),
+                  ?.copyWith(color: mutedTextColor),
               ),
             ],
           ),
@@ -815,6 +853,10 @@ class _KeyMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final labelColor = colorScheme.onSurface.withValues(alpha: 0.74);
+    final valueColor = colorScheme.onSurface;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -823,13 +865,13 @@ class _KeyMetric extends StatelessWidget {
           style: Theme.of(context)
               .textTheme
               .bodyMedium
-              ?.copyWith(color: Colors.white70),
+              ?.copyWith(color: labelColor),
         ),
         Text(
           value,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.w700,
-                color: highlight ? AppTheme.error : Colors.white,
+                color: highlight ? AppTheme.error : valueColor,
               ),
         ),
       ],
@@ -918,6 +960,11 @@ class _PeakTimeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = insight.totalSpent;
     final peak = insight.peakSession;
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeLabelColor = colorScheme.onSurface;
+    final inactiveLabelColor = colorScheme.onSurface.withValues(alpha: 0.66);
+    final inactiveAmountColor = colorScheme.onSurface.withValues(alpha: 0.46);
+    final progressTrackColor = colorScheme.onSurface.withValues(alpha: 0.08);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -967,8 +1014,9 @@ class _PeakTimeCard extends StatelessWidget {
                                   fontWeight: isPeak
                                       ? FontWeight.w700
                                       : FontWeight.w400,
-                                  color:
-                                      isPeak ? Colors.white : Colors.white60,
+                              color: isPeak
+                                ? activeLabelColor
+                                : inactiveLabelColor,
                                 ),
                       ),
                       Text(
@@ -980,7 +1028,7 @@ class _PeakTimeCard extends StatelessWidget {
                                       : FontWeight.w400,
                                   color: isPeak
                                       ? AppTheme.primary
-                                      : Colors.white38,
+                                      : inactiveAmountColor,
                                 ),
                       ),
                     ],
@@ -991,7 +1039,7 @@ class _PeakTimeCard extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: frac,
                       minHeight: isPeak ? 8 : 5,
-                      backgroundColor: Colors.white.withValues(alpha: 0.06),
+                      backgroundColor: progressTrackColor,
                       valueColor: AlwaysStoppedAnimation(barColor),
                     ),
                   ),
@@ -1275,7 +1323,12 @@ class _AnalyticsCards extends StatelessWidget {
                         style: Theme.of(context)
                             .textTheme
                             .bodySmall
-                            ?.copyWith(color: Colors.white70),
+                            ?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.72),
+                            ),
                       ),
                     ],
                   ),
