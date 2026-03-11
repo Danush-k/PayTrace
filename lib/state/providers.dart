@@ -92,6 +92,26 @@ final dailySpendingProvider =
   return db.getDailySpending(date.year, date.month);
 });
 
+/// Spending data for a date range (start, end) — aggregated by day
+class SpendingRange {
+  final DateTime start;
+  final DateTime end;
+  const SpendingRange(this.start, this.end);
+
+  @override
+  bool operator ==(Object other) =>
+      other is SpendingRange && start == other.start && end == other.end;
+
+  @override
+  int get hashCode => Object.hash(start, end);
+}
+
+final spendingInRangeProvider =
+    FutureProvider.family<Map<DateTime, double>, SpendingRange>((ref, range) {
+  final db = ref.watch(databaseProvider);
+  return db.getSpendingInRange(range.start, range.end);
+});
+
 /// Search transactions
 final transactionSearchProvider =
     FutureProvider.family<List<Transaction>, String>((ref, query) {

@@ -211,8 +211,7 @@ class _PayScreenState extends ConsumerState<PayScreen>
       // (the running poll might be stuck waiting on its interval timer)
       if (_isPolling) {
         _quickSmsScan().then((sms) {
-          if (sms != null && !_autoConfirmed && mounted) {
-            _autoConfirmed = true;
+          if (sms != null && mounted && _tryClaimAutoConfirm()) {
             _notificationSub?.cancel();
             _onAutoConfirmed(
               upiRefNumber: sms.refNumber,
@@ -281,9 +280,8 @@ class _PayScreenState extends ConsumerState<PayScreen>
 
     _isPolling = false;
 
-    if (matchedSms != null && !_autoConfirmed && mounted) {
+    if (matchedSms != null && mounted && _tryClaimAutoConfirm()) {
       debugPrint('PayTrace: SMS inbox poll found match! ref=${matchedSms.refNumber}, amount=${matchedSms.amount}');
-      _autoConfirmed = true;
       _notificationSub?.cancel();
       _onAutoConfirmed(
         upiRefNumber: matchedSms.refNumber,
@@ -500,9 +498,8 @@ class _PayScreenState extends ConsumerState<PayScreen>
           );
         }
 
-        if (matches) {
+        if (matches && _tryClaimAutoConfirm()) {
           debugPrint('PayTrace: Notification matches! Auto-confirming...');
-          _autoConfirmed = true;
           _notificationSub?.cancel();
           _onAutoConfirmed(
             detectedAmount: notification.amount,
@@ -550,9 +547,8 @@ class _PayScreenState extends ConsumerState<PayScreen>
       // (the bank SMS might have arrived in the last few seconds)
       final lastChanceSms = await _quickSmsScan();
 
-      if (lastChanceSms != null && !_autoConfirmed && mounted) {
+      if (lastChanceSms != null && mounted && _tryClaimAutoConfirm()) {
         debugPrint('PayTrace: Last-chance SMS scan found match! ref=${lastChanceSms.refNumber}, amount=${lastChanceSms.amount}');
-        _autoConfirmed = true;
         _countdownUiTimer?.cancel();
         _notificationSub?.cancel();
         setState(() => _waitingForAutoDetect = false);
@@ -612,6 +608,15 @@ class _PayScreenState extends ConsumerState<PayScreen>
     }
   }
 
+  /// Atomically claim the auto-confirm flag. Returns true only for
+  /// the FIRST caller — all subsequent callers get false, preventing
+  /// duplicate transaction creation from concurrent SMS + notification.
+  bool _tryClaimAutoConfirm() {
+    if (_autoConfirmed) return false;
+    _autoConfirmed = true;
+    return true;
+  }
+
   /// Called when a matching notification or SMS auto-confirms the payment
   void _onAutoConfirmed({String? upiRefNumber, double? detectedAmount}) async {
     if (!mounted) return;
@@ -665,10 +670,9 @@ class _PayScreenState extends ConsumerState<PayScreen>
     if (isAmountMissing && _paymentLaunchedAt != null) {
       debugPrint('PayTrace: Manual dialog — attempting second-chance SMS scan before showing dialog');
       final lastChanceSms = await _quickSmsScan();
-      if (lastChanceSms != null && !_autoConfirmed && mounted) {
+      if (lastChanceSms != null && mounted && _tryClaimAutoConfirm()) {
         debugPrint('PayTrace: Second-chance SMS scan found match! '
             'ref=${lastChanceSms.refNumber}, amount=${lastChanceSms.amount}');
-        _autoConfirmed = true;
         _notificationSub?.cancel();
         _onAutoConfirmed(
           upiRefNumber: lastChanceSms.refNumber,
@@ -770,8 +774,7 @@ class _PayScreenState extends ConsumerState<PayScreen>
                 // Try scanning SMS one more time
                 final sms = await _quickSmsScan();
                 if (!mounted) return;
-                if (sms != null && !_autoConfirmed) {
-                  _autoConfirmed = true;
+                if (sms != null && _tryClaimAutoConfirm()) {
                   _notificationSub?.cancel();
                   _smsSub?.cancel();
                   Navigator.of(context).pop();

@@ -58,15 +58,14 @@ class TransactionDetailScreen extends ConsumerWidget {
                   dense: true,
                 ),
               ),
-              if (transaction.paymentMode == 'SMS_IMPORT')
-                const PopupMenuItem(
-                  value: 'edit_name',
-                  child: ListTile(
-                    leading: Icon(Icons.person_outline_rounded, size: 20),
-                    title: Text('Edit Name'),
-                    dense: true,
-                  ),
+              const PopupMenuItem(
+                value: 'edit_name',
+                child: ListTile(
+                  leading: Icon(Icons.person_outline_rounded, size: 20),
+                  title: Text('Edit Name'),
+                  dense: true,
                 ),
+              ),
               const PopupMenuItem(
                 value: 'copy',
                 child: ListTile(
@@ -501,9 +500,9 @@ class TransactionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// Show dialog to edit the payee/payer name for SMS-imported transactions.
-  /// The edited name is saved to both the transaction and the payee record
-  /// so it will be reused for future imports from the same UPI ID.
+  /// Show dialog to edit the payee/payer name.
+  /// The edited name is saved to the payee record AND batch-updates
+  /// ALL past transactions with the same UPI ID.
   void _showEditNameDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController(text: transaction.payeeName);
 
@@ -517,7 +516,7 @@ class TransactionDetailScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Enter the name of the person. This will be remembered for future transactions from the same UPI ID.',
+              'This will update the name on all transactions with the same UPI ID.',
               style: Theme.of(ctx).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -548,8 +547,9 @@ class TransactionDetailScreen extends ConsumerWidget {
 
               final db = ref.read(databaseProvider);
 
-              // Update transaction name
-              await db.updateTransactionPayeeName(transaction.id, name);
+              // Batch-update ALL transactions with this UPI ID
+              await db.updateAllTransactionsPayeeName(
+                transaction.payeeUpiId, name);
 
               // Also update the payee record so future imports reuse this name
               final payee = await db.getPayeeByUpiId(transaction.payeeUpiId);

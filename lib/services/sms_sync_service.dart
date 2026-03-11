@@ -294,8 +294,10 @@ class SmsSyncService {
   /// Priority:
   ///   1. Contact lookup (phone number from UPI ID → device contacts)
   ///   2. Existing payee in DB (user may have edited it before)
-  ///   3. Name extracted from SMS body
-  ///   4. Cleaned bank sender name
+  ///   3. Name extracted from SMS body (skip bank names)
+  ///   4. UPI ID local part → readable name
+  ///   5. Phone number from UPI ID
+  ///   6. Raw UPI ID / "Unknown"
   static Future<String> _resolvePayeeName(
     AppDatabase db,
     BankSms sms,
@@ -312,23 +314,24 @@ class SmsSyncService {
     final existingPayee = await db.getPayeeByUpiId(payeeUpiId);
     if (existingPayee != null && existingPayee.name.isNotEmpty) {
       // Don't reuse bank-code names (like "SBI", "HDFC Bank")
-      final isBankName = _bankNames.contains(existingPayee.name);
-      if (!isBankName) {
+      if (!_bankNames.contains(existingPayee.name)) {
         debugPrint('PayTrace SMS Sync: Name from DB → ${existingPayee.name}');
         return existingPayee.name;
       }
     }
 
     // 3. Name extracted from SMS body (e.g., "to JOHN DOE via UPI")
+    //    Skip if it resolved to the user's own bank name.
     if (sms.payeeName != null && sms.payeeName!.isNotEmpty) {
-      return sms.payeeName!;
+      if (!_bankNames.contains(sms.payeeName!)) {
+        return sms.payeeName!;
+      }
     }
 
-    // 4. UPI ID → readable name (e.g., "john.doe@ybl" → "John Doe")
-    final upiId = _extractUpiId(sms.body);
-    if (upiId != null) {
-      final localPart = upiId.split('@').first;
-      // Only use if it's not just digits (phone number)
+    // 4. UPI ID → readable name (use payeeUpiId directly)
+    if (payeeUpiId.contains('@')) {
+      final localPart = payeeUpiId.split('@').first;
+      // If local part has letters, convert to readable name
       if (RegExp(r'[a-zA-Z]').hasMatch(localPart)) {
         final name = localPart
             .replaceAll(RegExp(r'[._-]'), ' ')
@@ -339,10 +342,16 @@ class SmsSyncService {
             .join(' ');
         if (name.length >= 2) return name;
       }
+      // 5. Phone-based UPI ID (e.g., "9876543210@ybl") — show the number
+      if (RegExp(r'^\d{10,}$').hasMatch(localPart)) {
+        return localPart;
+      }
+      // 6. Return raw UPI ID rather than bank name
+      return payeeUpiId;
     }
 
-    // 5. Fall back to cleaned bank sender
-    return _sanitizeSender(sms.sender);
+    // No UPI ID found — avoid showing the user's own bank name
+    return 'Unknown';
   }
 
   /// Known bank names — skip reusing these from payee DB

@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:intl/intl.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/category_engine.dart';
@@ -74,7 +75,6 @@ class HomeScreen extends ConsumerWidget {
 
     final spentAsync = ref.watch(monthlySpendingProvider(monthKey));
     final receivedAsync = ref.watch(monthlyReceivedProvider(monthKey));
-    final dailyAsync = ref.watch(dailySpendingProvider(monthKey));
     final recentAsync = ref.watch(recentTransactionsProvider);
     final allTxnsAsync = ref.watch(allTransactionsProvider);
 
@@ -122,7 +122,7 @@ class HomeScreen extends ConsumerWidget {
           error: (_, __) => const SizedBox.shrink(),
         ),
         const SizedBox(height: 16),
-        _DailySpendChart(dailyAsync: dailyAsync),
+        const _SpendingChart(),
         const SizedBox(height: 16),
         const TransactionActivityHeatmap(),
         const SizedBox(height: 18),
@@ -279,13 +279,67 @@ class _MetricPill extends StatelessWidget {
   }
 }
 
-class _DailySpendChart extends StatelessWidget {
-  final AsyncValue<Map<int, double>> dailyAsync;
+// ═══════════════════════════════════════════════════════════════════════════
+//  SPENDING CHART — Professional with time period filters
+// ═══════════════════════════════════════════════════════════════════════════
 
-  const _DailySpendChart({required this.dailyAsync});
+enum _ChartPeriod { week, month, threeMonth, sixMonth, year }
+
+extension on _ChartPeriod {
+  String get label => switch (this) {
+        _ChartPeriod.week => '1W',
+        _ChartPeriod.month => '1M',
+        _ChartPeriod.threeMonth => '3M',
+        _ChartPeriod.sixMonth => '6M',
+        _ChartPeriod.year => '1Y',
+      };
+
+  DateTimeRange range() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    return switch (this) {
+      _ChartPeriod.week => DateTimeRange(
+          start: today.subtract(const Duration(days: 6)),
+          end: today,
+        ),
+      _ChartPeriod.month => DateTimeRange(
+          start: DateTime(now.year, now.month, 1),
+          end: today,
+        ),
+      _ChartPeriod.threeMonth => DateTimeRange(
+          start: DateTime(now.year, now.month - 2, 1),
+          end: today,
+        ),
+      _ChartPeriod.sixMonth => DateTimeRange(
+          start: DateTime(now.year, now.month - 5, 1),
+          end: today,
+        ),
+      _ChartPeriod.year => DateTimeRange(
+          start: DateTime(now.year - 1, now.month + 1, 1),
+          end: today,
+        ),
+    };
+  }
+}
+
+class _SpendingChart extends ConsumerStatefulWidget {
+  const _SpendingChart();
+
+  @override
+  ConsumerState<_SpendingChart> createState() => _SpendingChartState();
+}
+
+class _SpendingChartState extends ConsumerState<_SpendingChart> {
+  _ChartPeriod _selected = _ChartPeriod.month;
+  int? _touchedIndex;
 
   @override
   Widget build(BuildContext context) {
+    final range = _selected.range();
+    final spendingRange = SpendingRange(range.start, range.end);
+    final asyncData = ref.watch(spendingInRangeProvider(spendingRange));
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       decoration: BoxDecoration(
@@ -295,100 +349,401 @@ class _DailySpendChart extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Spending Chart',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+          // Header row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Spending',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              // Total for selected period
+              asyncData.when(
+                data: (daily) {
+                  final total = daily.values.fold<double>(0, (s, v) => s + v);
+                  return Text(
+                    Formatters.currencyCompact(total),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.primary,
+                        ),
+                  );
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 170,
-            child: dailyAsync.when(
-              data: (daily) {
-                if (daily.isEmpty) {
-                  return const Center(child: Text('No chart data'));
-                }
-                final sortedDays = daily.keys.toList()..sort();
-                final spots = sortedDays
-                    .map((d) => FlSpot(d.toDouble(), daily[d] ?? 0))
-                    .toList();
-                final maxY = max<double>(
-                  1,
-                  spots.fold<double>(0, (m, e) => max(m, e.y)),
-                );
-
-                return LineChart(
-                  LineChartData(
-                    minX: sortedDays.first.toDouble(),
-                    maxX: sortedDays.last.toDouble(),
-                    minY: 0,
-                    maxY: maxY * 1.2,
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: maxY / 4,
-                      getDrawingHorizontalLine: (_) => FlLine(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.08),
-                        strokeWidth: 1,
-                      ),
+          // Period filter chips
+          Row(
+            children: _ChartPeriod.values.map((p) {
+              final isActive = p == _selected;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    _selected = p;
+                    _touchedIndex = null;
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? AppTheme.primary
+                          : (isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : Colors.black.withValues(alpha: 0.04)),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    titlesData: FlTitlesData(
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      leftTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          interval: max(1, (sortedDays.length / 5).floor()).toDouble(),
-                          getTitlesWidget: (value, _) {
-                            return Text(
-                              value.toInt().toString(),
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                                  ),
-                            );
-                          },
-                        ),
-                      ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      p.label,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontWeight:
+                                isActive ? FontWeight.w700 : FontWeight.w500,
+                            color: isActive
+                                ? Colors.white
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.6),
+                            fontSize: 12,
+                          ),
                     ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: spots,
-                        isCurved: true,
-                        barWidth: 3,
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? AppTheme.primary
-                            : AppTheme.primaryDark,
-                        belowBarData: BarAreaData(
-                          show: true,
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? AppTheme.primary.withValues(alpha: 0.14)
-                              : AppTheme.primaryDark.withValues(alpha: 0.18),
-                        ),
-                        dotData: const FlDotData(show: false),
-                      ),
-                    ],
                   ),
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              error: (_, __) => const Center(child: Text('Chart unavailable')),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          // Chart
+          SizedBox(
+            height: 180,
+            child: asyncData.when(
+              data: (daily) => _buildChart(context, daily, range, isDark),
+              loading: () => const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              error: (_, __) =>
+                  const Center(child: Text('Chart unavailable')),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildChart(
+    BuildContext context,
+    Map<DateTime, double> rawDaily,
+    DateTimeRange range,
+    bool isDark,
+  ) {
+    // Build aggregated data points depending on the period
+    final aggregated = _aggregate(rawDaily, range);
+
+    if (aggregated.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.bar_chart_rounded,
+                size: 40,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.2)),
+            const SizedBox(height: 8),
+            Text('No spending data',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.4),
+                    )),
+          ],
+        ),
+      );
+    }
+
+    final spots = <FlSpot>[];
+    for (int i = 0; i < aggregated.length; i++) {
+      spots.add(FlSpot(i.toDouble(), aggregated[i].value));
+    }
+
+    final maxY = spots.fold<double>(1, (m, e) => max(m, e.y));
+    final lineColor = isDark ? AppTheme.primary : AppTheme.primaryDark;
+
+    return LineChart(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      LineChartData(
+        minX: 0,
+        maxX: (spots.length - 1).toDouble(),
+        minY: 0,
+        maxY: maxY * 1.15,
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: maxY / 3,
+          getDrawingHorizontalLine: (_) => FlLine(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.05)
+                : Colors.black.withValues(alpha: 0.06),
+            strokeWidth: 1,
+            dashArray: [4, 4],
+          ),
+        ),
+        titlesData: FlTitlesData(
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 42,
+              interval: maxY / 3,
+              getTitlesWidget: (value, _) {
+                if (value == 0) return const SizedBox.shrink();
+                return Text(
+                  _compactAmount(value),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.4),
+                        fontSize: 10,
+                      ),
+                );
+              },
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 28,
+              interval: _bottomInterval(aggregated.length),
+              getTitlesWidget: (value, _) {
+                final idx = value.toInt();
+                if (idx < 0 || idx >= aggregated.length) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    aggregated[idx].label,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.5),
+                          fontSize: 10,
+                        ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        lineTouchData: LineTouchData(
+          handleBuiltInTouches: true,
+          touchCallback: (event, response) {
+            setState(() {
+              if (event is FlLongPressEnd || event is FlPanEndEvent) {
+                _touchedIndex = null;
+              } else {
+                _touchedIndex =
+                    response?.lineBarSpots?.first.spotIndex;
+              }
+            });
+          },
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipColor: (_) => isDark
+                ? const Color(0xFF2A2D3E)
+                : Colors.white,
+            tooltipRoundedRadius: 10,
+            tooltipPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            getTooltipItems: (spots) {
+              return spots.map((spot) {
+                final idx = spot.spotIndex;
+                final label = idx < aggregated.length
+                    ? aggregated[idx].label
+                    : '';
+                return LineTooltipItem(
+                  '$label\n',
+                  TextStyle(
+                    color: isDark ? Colors.white60 : Colors.black54,
+                    fontSize: 11,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: Formatters.currency(spot.y),
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                );
+              }).toList();
+            },
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.3,
+            preventCurveOverShooting: true,
+            barWidth: 2.5,
+            isStrokeCapRound: true,
+            color: lineColor,
+            shadow: Shadow(
+              color: lineColor.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  lineColor.withValues(alpha: 0.25),
+                  lineColor.withValues(alpha: 0.0),
+                ],
+              ),
+            ),
+            dotData: FlDotData(
+              show: true,
+              getDotPainter: (spot, _, __, ___) {
+                final isTouched = spot.x.toInt() == _touchedIndex;
+                return FlDotCirclePainter(
+                  radius: isTouched ? 5 : 0,
+                  color: lineColor,
+                  strokeWidth: 2,
+                  strokeColor: isDark ? Colors.black : Colors.white,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Aggregate raw daily data into chart-friendly buckets.
+  /// For 1W/1M: one point per day.
+  /// For 3M/6M: one point per week.
+  /// For 1Y: one point per month.
+  List<_ChartPoint> _aggregate(
+    Map<DateTime, double> rawDaily,
+    DateTimeRange range,
+  ) {
+    switch (_selected) {
+      case _ChartPeriod.week:
+        return _dailyPoints(rawDaily, range, 7);
+      case _ChartPeriod.month:
+        final days = range.end.difference(range.start).inDays + 1;
+        return _dailyPoints(rawDaily, range, days);
+      case _ChartPeriod.threeMonth:
+      case _ChartPeriod.sixMonth:
+        return _weeklyPoints(rawDaily, range);
+      case _ChartPeriod.year:
+        return _monthlyPoints(rawDaily, range);
+    }
+  }
+
+  List<_ChartPoint> _dailyPoints(
+    Map<DateTime, double> raw,
+    DateTimeRange range,
+    int dayCount,
+  ) {
+    final points = <_ChartPoint>[];
+    for (int i = 0; i < dayCount; i++) {
+      final date = range.start.add(Duration(days: i));
+      final key = DateTime(date.year, date.month, date.day);
+      final value = raw[key] ?? 0;
+      final label = dayCount <= 7
+          ? DateFormat('EEE').format(date) // Mon, Tue...
+          : DateFormat('d').format(date); // 1, 2, 3...
+      points.add(_ChartPoint(label: label, value: value));
+    }
+    return points;
+  }
+
+  List<_ChartPoint> _weeklyPoints(
+    Map<DateTime, double> raw,
+    DateTimeRange range,
+  ) {
+    final points = <_ChartPoint>[];
+    var weekStart = range.start;
+    while (weekStart.isBefore(range.end)) {
+      var weekEnd = weekStart.add(const Duration(days: 6));
+      if (weekEnd.isAfter(range.end)) weekEnd = range.end;
+
+      double total = 0;
+      for (var d = weekStart;
+          !d.isAfter(weekEnd);
+          d = d.add(const Duration(days: 1))) {
+        final key = DateTime(d.year, d.month, d.day);
+        total += raw[key] ?? 0;
+      }
+
+      final label = DateFormat('d MMM').format(weekStart);
+      points.add(_ChartPoint(label: label, value: total));
+      weekStart = weekEnd.add(const Duration(days: 1));
+    }
+    return points;
+  }
+
+  List<_ChartPoint> _monthlyPoints(
+    Map<DateTime, double> raw,
+    DateTimeRange range,
+  ) {
+    final points = <_ChartPoint>[];
+    var cursor = DateTime(range.start.year, range.start.month);
+    final endMonth = DateTime(range.end.year, range.end.month);
+
+    while (!cursor.isAfter(endMonth)) {
+      double total = 0;
+      for (final entry in raw.entries) {
+        if (entry.key.year == cursor.year && entry.key.month == cursor.month) {
+          total += entry.value;
+        }
+      }
+      final label = DateFormat('MMM').format(cursor);
+      points.add(_ChartPoint(label: label, value: total));
+      cursor = DateTime(cursor.year, cursor.month + 1);
+    }
+    return points;
+  }
+
+  double _bottomInterval(int count) {
+    if (count <= 7) return 1;
+    if (count <= 15) return 2;
+    if (count <= 31) return 5;
+    return max(1, (count / 6).ceilToDouble());
+  }
+
+  String _compactAmount(double value) {
+    if (value >= 100000) return '₹${(value / 100000).toStringAsFixed(1)}L';
+    if (value >= 1000) return '₹${(value / 1000).toStringAsFixed(1)}K';
+    return '₹${value.toInt()}';
+  }
+}
+
+class _ChartPoint {
+  final String label;
+  final double value;
+  const _ChartPoint({required this.label, required this.value});
 }
 
 class _SpendingAlertsSection extends StatelessWidget {

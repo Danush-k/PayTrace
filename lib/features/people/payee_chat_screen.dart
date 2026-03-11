@@ -29,10 +29,12 @@ class PayeeChatScreen extends ConsumerStatefulWidget {
 class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
   List<Transaction>? _transactions;
   bool _loading = true;
+  late String _displayName;
 
   @override
   void initState() {
     super.initState();
+    _displayName = widget.payeeName;
     _loadTransactions();
   }
 
@@ -135,8 +137,8 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      widget.payeeName.isNotEmpty
-                          ? widget.payeeName[0].toUpperCase()
+                      _displayName.isNotEmpty
+                          ? _displayName[0].toUpperCase()
                           : '?',
                       style: const TextStyle(
                         fontSize: 18,
@@ -152,7 +154,7 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.payeeName,
+                        _displayName,
                         style: Theme.of(context)
                             .textTheme
                             .titleMedium
@@ -169,6 +171,11 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
                       ),
                     ],
                   ),
+                ),
+                IconButton(
+                  onPressed: () => _showRenameDialog(context),
+                  icon: const Icon(Icons.edit_rounded, size: 20),
+                  tooltip: 'Edit Name',
                 ),
               ],
             ),
@@ -226,7 +233,7 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Tap Pay below to send money to ${widget.payeeName}',
+              'Tap Pay below to send money to $_displayName',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
@@ -313,7 +320,7 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
               MaterialPageRoute(
                 builder: (_) => PayScreen(
                   prefilledUpiId: widget.payeeUpiId,
-                  prefilledName: widget.payeeName,
+                  prefilledName: _displayName,
                 ),
               ),
             );
@@ -322,7 +329,7 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
           },
           icon: const Icon(Icons.send_rounded, size: 20),
           label: Text(
-            'Pay ${widget.payeeName.split(' ').first}',
+            'Pay ${_displayName.split(' ').first}',
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -336,6 +343,77 @@ class _PayeeChatScreenState extends ConsumerState<PayeeChatScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showRenameDialog(BuildContext context) {
+    final controller = TextEditingController(text: _displayName);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit Name'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'This will update the name on all transactions with this UPI ID.',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: 'Name',
+                hintText: 'e.g. Mom, John Doe',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                prefixIcon: const Icon(Icons.person_rounded),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+
+              final db = ref.read(databaseProvider);
+
+              // Batch-update ALL transactions with this UPI ID
+              await db.updateAllTransactionsPayeeName(
+                widget.payeeUpiId, name);
+
+              // Also update the payee record
+              final payee = await db.getPayeeByUpiId(widget.payeeUpiId);
+              if (payee != null) {
+                await db.updatePayeeName(payee.id, name);
+              }
+
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                setState(() => _displayName = name);
+                _loadTransactions();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Updated name to "$name"'),
+                    backgroundColor: AppTheme.success,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
   }

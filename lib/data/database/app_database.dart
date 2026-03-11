@@ -132,6 +132,16 @@ class AppDatabase extends _$AppDatabase {
     return result > 0;
   }
 
+  /// Batch-update payee name on ALL transactions matching a UPI ID.
+  Future<int> updateAllTransactionsPayeeName(String upiId, String name) async {
+    return (update(transactions)
+          ..where((t) => t.payeeUpiId.equals(upiId)))
+        .write(TransactionsCompanion(
+      payeeName: Value(name),
+      updatedAt: Value(DateTime.now()),
+    ));
+  }
+
   /// Update transaction category
   Future<bool> updateTransactionCategory(String id, String category) async {
     final result = await (update(transactions)
@@ -494,6 +504,26 @@ class AppDatabase extends _$AppDatabase {
     final daily = <int, double>{};
     for (final txn in rows) {
       final day = txn.createdAt.day;
+      daily[day] = (daily[day] ?? 0) + txn.amount;
+    }
+    return daily;
+  }
+
+  /// Returns a list of (date, amount) pairs for successful DEBIT transactions
+  /// within a date range, aggregated by day.
+  Future<Map<DateTime, double>> getSpendingInRange(
+      DateTime start, DateTime end) async {
+    final rows = await (select(transactions)
+          ..where((t) =>
+              t.createdAt.isBiggerOrEqualValue(start) &
+              t.createdAt.isSmallerOrEqualValue(end) &
+              t.direction.equals('DEBIT') &
+              t.status.equals('SUCCESS')))
+        .get();
+
+    final daily = <DateTime, double>{};
+    for (final txn in rows) {
+      final day = DateTime(txn.createdAt.year, txn.createdAt.month, txn.createdAt.day);
       daily[day] = (daily[day] ?? 0) + txn.amount;
     }
     return daily;

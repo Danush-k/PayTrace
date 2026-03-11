@@ -87,11 +87,13 @@ class SmsService {
       },
       onError: (e) {
         debugPrint('PayTrace: SMS EventChannel error: $e — will reconnect');
+        _platformSubscription?.cancel();
         _platformSubscription = null;
         _platformListening = false;
       },
       onDone: () {
         debugPrint('PayTrace: SMS EventChannel closed — will reconnect');
+        _platformSubscription?.cancel();
         _platformSubscription = null;
         _platformListening = false;
       },

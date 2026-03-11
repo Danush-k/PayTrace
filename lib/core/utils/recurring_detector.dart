@@ -67,7 +67,13 @@ class RecurringDetector {
         nextExpected = lastPaid.add(Duration(days: avgGap.round()));
       } else if (avgGap <= 45) {
         frequency = 'Monthly';
-        nextExpected = DateTime(lastPaid.year, lastPaid.month + 1, lastPaid.day);
+        // Safe date: clamp day to the last valid day of next month
+        // (e.g. Jan 31 → Feb 28, Mar 31 → Apr 30)
+        final nextMonth = lastPaid.month == 12 ? 1 : lastPaid.month + 1;
+        final nextYear = lastPaid.month == 12 ? lastPaid.year + 1 : lastPaid.year;
+        final lastDayOfNextMonth = DateTime(nextYear, nextMonth + 1, 0).day;
+        final safeDay = lastPaid.day > lastDayOfNextMonth ? lastDayOfNextMonth : lastPaid.day;
+        nextExpected = DateTime(nextYear, nextMonth, safeDay);
       } else {
         frequency = 'Frequent';
         nextExpected = lastPaid.add(Duration(days: avgGap.round()));
