@@ -74,7 +74,6 @@ class HomeScreen extends ConsumerWidget {
 
     final spentAsync = ref.watch(monthlySpendingProvider(monthKey));
     final receivedAsync = ref.watch(monthlyReceivedProvider(monthKey));
-    final dailyAsync = ref.watch(dailySpendingProvider(monthKey));
     final recentAsync = ref.watch(recentTransactionsProvider);
     final allTxnsAsync = ref.watch(allTransactionsProvider);
 
@@ -122,7 +121,7 @@ class HomeScreen extends ConsumerWidget {
           error: (_, __) => const SizedBox.shrink(),
         ),
         const SizedBox(height: 16),
-        _DailySpendChart(dailyAsync: dailyAsync),
+        const _DailySpendChart(),
         const SizedBox(height: 16),
         const TransactionActivityHeatmap(),
         const SizedBox(height: 18),
@@ -279,106 +278,111 @@ class _MetricPill extends StatelessWidget {
   }
 }
 
-class _DailySpendChart extends StatelessWidget {
-  final AsyncValue<Map<int, double>> dailyAsync;
+class _DailySpendChart extends ConsumerStatefulWidget {
+  const _DailySpendChart();
 
-  const _DailySpendChart({required this.dailyAsync});
+  @override
+  ConsumerState<_DailySpendChart> createState() => _DailySpendChartState();
+}
+
+class _DailySpendChartState extends ConsumerState<_DailySpendChart> {
+  int _selectedDays = 7;
+  bool _isLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) setState(() => _isLoaded = true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final dailyAsync = ref.watch(spendingLastNDaysProvider(_selectedDays));
+    
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: Theme.of(context).brightness == Brightness.dark
+              ? [const Color(0xFF1E2130), const Color(0xFF13151E)]
+              : [const Color(0xFFFFFFFF), const Color(0xFFF9FAFF)],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Spending Chart',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Spending Trend',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your daily spending pattern',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey.shade500,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ],
                 ),
+              ),
+              _buildDateSelector(),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 32),
           SizedBox(
-            height: 170,
+            height: 220,
             child: dailyAsync.when(
               data: (daily) {
                 if (daily.isEmpty) {
-                  return const Center(child: Text('No chart data'));
+                  return const Center(child: Text('No chart data available'));
                 }
+                
                 final sortedDays = daily.keys.toList()..sort();
-                final spots = sortedDays
-                    .map((d) => FlSpot(d.toDouble(), daily[d] ?? 0))
-                    .toList();
-                final maxY = max<double>(
-                  1,
-                  spots.fold<double>(0, (m, e) => max(m, e.y)),
-                );
+                final spots = sortedDays.asMap().entries.map((e) {
+                  return FlSpot(e.key.toDouble(), daily[e.value] ?? 0);
+                }).toList();
 
-                return LineChart(
-                  LineChartData(
-                    minX: sortedDays.first.toDouble(),
-                    maxX: sortedDays.last.toDouble(),
-                    minY: 0,
-                    maxY: maxY * 1.2,
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: maxY / 4,
-                      getDrawingHorizontalLine: (_) => FlLine(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.08),
-                        strokeWidth: 1,
-                      ),
-                    ),
-                    titlesData: FlTitlesData(
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      leftTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          interval: max(1, (sortedDays.length / 5).floor()).toDouble(),
-                          getTitlesWidget: (value, _) {
-                            return Text(
-                              value.toInt().toString(),
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                                  ),
-                            );
-                          },
-                        ),
-                      ),
-                    ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: spots,
-                        isCurved: true,
-                        barWidth: 3,
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? AppTheme.primary
-                            : AppTheme.primaryDark,
-                        belowBarData: BarAreaData(
-                          show: true,
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? AppTheme.primary.withValues(alpha: 0.14)
-                              : AppTheme.primaryDark.withValues(alpha: 0.18),
-                        ),
-                        dotData: const FlDotData(show: false),
-                      ),
-                    ],
-                  ),
+                final maxYValue = spots.fold<double>(0, (m, e) => max(m, e.y));
+                final maxY = max<double>(100, maxYValue);
+                
+                final gradientColors = [
+                  const Color(0xFF7B61FF),
+                  const Color(0xFF4DA1FF),
+                ];
+
+                return TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: _isLoaded ? 0.0 : 1.0, end: 1.0),
+                  duration: const Duration(milliseconds: 1200),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, animValue, child) {
+                    final animatedSpots = spots.map((s) => FlSpot(s.x, s.y * animValue)).toList();
+                    return _buildChart(animatedSpots, sortedDays, maxY, gradientColors);
+                  },
                 );
               },
               loading: () => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -387,6 +391,206 @@ class _DailySpendChart extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildDateSelector() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [7, 30, 90].map((days) {
+          final isSelected = _selectedDays == days;
+          return GestureDetector(
+            onTap: () {
+              if (!isSelected) {
+                setState(() => _selectedDays = days);
+              }
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected 
+                    ? AppTheme.primary
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: AppTheme.primary.withValues(alpha: 0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        )
+                      ]
+                    : [],
+              ),
+              child: Text(
+                '${days}D',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                  color: isSelected 
+                    ? Colors.white 
+                    : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildChart(List<FlSpot> spots, List<DateTime> sortedDays, double maxY, List<Color> gradientColors) {
+    return LineChart(
+      LineChartData(
+        minX: 0,
+        maxX: max(1, sortedDays.length - 1).toDouble(),
+        minY: 0,
+        maxY: maxY * 1.15,
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: max(1, maxY / 4),
+          getDrawingHorizontalLine: (_) => FlLine(
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.06),
+            strokeWidth: 1,
+            dashArray: [4, 4],
+          ),
+        ),
+        titlesData: FlTitlesData(
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 42,
+              interval: max(1, maxY / 3),
+              getTitlesWidget: (value, _) {
+                if (value == 0 || value > maxY * 1.1) return const SizedBox.shrink();
+                String text;
+                if (value >= 1000) {
+                  text = '${(value / 1000).toStringAsFixed(1)}k';
+                } else {
+                  text = value.toInt().toString();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Text(
+                    '₹$text',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.45),
+                    ),
+                    textAlign: TextAlign.right,
+                  ),
+                );
+              },
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: max(1, (sortedDays.length / 6).floor()).toDouble(),
+              getTitlesWidget: (value, _) {
+                final idx = value.toInt();
+                if (idx < 0 || idx >= sortedDays.length) return const SizedBox.shrink();
+                final date = sortedDays[idx];
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    '${date.day}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.45),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        lineTouchData: LineTouchData(
+          handleBuiltInTouches: true,
+          touchTooltipData: LineTouchTooltipData(
+            fitInsideHorizontally: true,
+            fitInsideVertically: true,
+            getTooltipColor: (_) => const Color(0xFF232533),
+            tooltipRoundedRadius: 14,
+            tooltipPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            getTooltipItems: (touchedSpots) {
+              return touchedSpots.map((spot) {
+                final date = sortedDays[spot.x.toInt()];
+                return LineTooltipItem(
+                  '₹${spot.y.toStringAsFixed(0)}\n',
+                  const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                  children: [
+                    TextSpan(
+                      text: Formatters.dateShort(date),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                );
+              }).toList();
+            },
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.35,
+            preventCurveOverShooting: true,
+            barWidth: 4,
+            gradient: LinearGradient(colors: gradientColors),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                colors: gradientColors.map((c) => c.withValues(alpha: 0.35)).toList(),
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            dotData: FlDotData(
+              show: true,
+              checkToShowDot: (spot, barData) {
+                // Show dots only on the selected touch spot or extremes if needed. 
+                // But touch handles the selected point automatically. 
+                // For a fintech look, we only show dots if they are non-zero key points
+                return spot.y != 0 && (spot.y == maxY || spot.x == sortedDays.length - 1);
+              },
+              getDotPainter: (spot, percent, barData, index) {
+                return FlDotCirclePainter(
+                  radius: 5,
+                  color: Colors.white,
+                  strokeWidth: 3,
+                  strokeColor: gradientColors.last,
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutCubic,
     );
   }
 }

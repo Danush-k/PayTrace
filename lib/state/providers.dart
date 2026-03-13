@@ -92,6 +92,13 @@ final dailySpendingProvider =
   return db.getDailySpending(date.year, date.month);
 });
 
+/// Daily spending for the last N days
+final spendingLastNDaysProvider =
+    FutureProvider.family<Map<DateTime, double>, int>((ref, days) {
+  final db = ref.watch(databaseProvider);
+  return db.getSpendingLastNDays(days);
+});
+
 /// Search transactions
 final transactionSearchProvider =
     FutureProvider.family<List<Transaction>, String>((ref, query) {

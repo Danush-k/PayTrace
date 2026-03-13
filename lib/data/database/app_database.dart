@@ -499,6 +499,35 @@ class AppDatabase extends _$AppDatabase {
     return daily;
   }
 
+  /// Returns a map of DateTime (truncated to day) → total DEBIT amount for the last [days].
+  Future<Map<DateTime, double>> getSpendingLastNDays(int days) async {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    
+    final rows = await (select(transactions)
+          ..where((t) =>
+              t.createdAt.isBiggerOrEqualValue(start) &
+              t.direction.equals('DEBIT') &
+              t.status.equals('SUCCESS')))
+        .get();
+
+    final daily = <DateTime, double>{};
+    // Initialize with 0s to ensure continuous dates
+    for (int i = 0; i < days; i++) {
+        final d = start.add(Duration(days: i));
+        daily[DateTime(d.year, d.month, d.day)] = 0.0;
+    }
+
+    for (final txn in rows) {
+      final d = txn.createdAt;
+      final day = DateTime(d.year, d.month, d.day);
+      if (daily.containsKey(day)) {
+        daily[day] = daily[day]! + txn.amount;
+      }
+    }
+    return daily;
+  }
+
   /// Returns total monthly spent (DEBIT) amounts for given months.
   /// Returns list in same order as input dates.
   Future<List<double>> getMonthlySpendingHistory(
