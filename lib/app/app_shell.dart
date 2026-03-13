@@ -7,6 +7,7 @@ import '../features/history/manual_expense_entry_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/insights/insights_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/subscriptions/subscriptions_screen.dart';
 import '../features/summary/daily_summary_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -44,6 +45,7 @@ class _AppShellState extends State<AppShell> {
     HomeScreen(),
     HistoryScreen(),
     InsightsScreen(),
+    SubscriptionsScreen(),
     SettingsScreen(),
   ];
 
@@ -99,6 +101,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.insights_outlined),
             selectedIcon: Icon(Icons.insights_rounded),
             label: 'Insights',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.autorenew_outlined),
+            selectedIcon: Icon(Icons.autorenew_rounded),
+            label: 'Subs',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

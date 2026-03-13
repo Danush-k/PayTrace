@@ -82,22 +82,27 @@ class _TransactionActivityHeatmapState
 
   @override
   Widget build(BuildContext context) {
-    final surfaceColor = Theme.of(context).colorScheme.surface;
-
     return LayoutBuilder(
       builder: (context, constraints) {
         return Container(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
           decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: BorderRadius.circular(24),
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 24,
-                offset: const Offset(0, 12),
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: Theme.of(context).brightness == Brightness.dark
+                  ? [const Color(0xFF1E2130), const Color(0xFF13151E)]
+                  : [const Color(0xFFFFFFFF), const Color(0xFFF9FAFF)],
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -110,14 +115,18 @@ class _TransactionActivityHeatmapState
                       children: [
                         Text(
                           'Activity Heatmap',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
                               ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Daily money movement across the month',
-                          style: Theme.of(context).textTheme.bodySmall,
+                          'Daily spending intensity',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey.shade500,
+                                fontWeight: FontWeight.w500,
+                              ),
                         ),
                       ],
                     ),
@@ -186,7 +195,8 @@ class _TransactionActivityHeatmapState
               Text(
                 Formatters.dateShort(day),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
                     ),
               ),
               const SizedBox(height: 18),
@@ -194,17 +204,17 @@ class _TransactionActivityHeatmapState
                 children: [
                   Expanded(
                     child: _MetricCard(
-                      label: 'Spent',
+                      label: 'Total Spend',
                       value: Formatters.currency(stats.spent),
-                      accent: const Color(0xFF0E9F6E),
+                      accent: const Color(0xFFFF4D4D),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: _MetricCard(
-                      label: 'Income',
+                      label: 'Received',
                       value: Formatters.currency(stats.income),
-                      accent: const Color(0xFF14B8A6),
+                      accent: const Color(0xFF3DDC97),
                     ),
                   ),
                 ],
@@ -213,26 +223,34 @@ class _TransactionActivityHeatmapState
               _MetricCard(
                 label: 'Transactions',
                 value: '${stats.count}',
-                accent: Theme.of(context).colorScheme.primary,
+                accent: const Color(0xFF7B61FF),
                 icon: Icons.receipt_long_rounded,
               ),
               if (stats.categories.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 Text(
                   'Categories',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                       ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
-                  runSpacing: 6,
+                  runSpacing: 8,
                   children: stats.categories.map((cat) {
-                    return Chip(
-                      label: Text(cat),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).brightness == Brightness.dark 
+                           ? Colors.white.withValues(alpha: 0.1) 
+                           : Colors.black.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        cat,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      )
                     );
                   }).toList(),
                 ),
@@ -416,113 +434,80 @@ class _HeatmapDayCell extends StatelessWidget {
       hasSpending: value > 0,
     );
     final selectedBorderColor = brightness == Brightness.dark
-        ? Colors.white.withValues(alpha: 0.7)
-        : Colors.black.withValues(alpha: 0.5);
+        ? Colors.white.withValues(alpha: 0.9)
+        : Colors.black.withValues(alpha: 0.8);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
-        splashColor: fillColor.withValues(alpha: 0.3),
-        highlightColor: fillColor.withValues(alpha: 0.15),
+        splashColor: fillColor.withValues(alpha: 0.5),
+        highlightColor: fillColor.withValues(alpha: 0.2),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
           decoration: BoxDecoration(
             color: fillColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: isSelected
                   ? selectedBorderColor
-                  : Colors.transparent,
+                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
               width: isSelected ? 2.0 : 1.0,
             ),
-            boxShadow: isSelected
+            boxShadow: (isSelected || (value > 0 && intensity > 0.6))
                 ? [
                     BoxShadow(
-                      color: fillColor.withValues(alpha: 0.35),
-                      blurRadius: 8,
+                      color: fillColor.withValues(alpha: 0.4),
+                      blurRadius: isSelected ? 8 : 4,
                       offset: const Offset(0, 2),
                     ),
                   ]
                 : [],
           ),
-          child: Stack(
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6, right: 6),
-                  child: Text(
-                    '${date.day}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: value > 0
-                              ? (intensity > 0.4
-                                  ? Colors.white.withValues(alpha: 0.95)
-                                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))
-                              : Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.48),
-                          fontWeight: FontWeight.w700,
-                        ),
+          child: Center(
+            child: Text(
+              '${date.day}',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: value > 0
+                        ? (intensity > 0.4
+                            ? Colors.white
+                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))
+                        : Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.35),
+                    fontWeight: value > 0 && intensity > 0.4 ? FontWeight.bold : FontWeight.w600,
                   ),
-                ),
-              ),
-              if (value > 0)
-                Align(
-                  alignment: Alignment.bottomLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 7, bottom: 7),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: intensity > 0.4
-                            ? Colors.white.withValues(alpha: 0.88)
-                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// Multi-color intensity scale:
-  /// Very Low → Light Green (#E8F5E9)
-  /// Low → Green (#81C784)
-  /// Medium → Yellow (#FFD54F)
-  /// High → Orange (#FF8A65)
-  /// Very High → Red (#E53935)
+  /// Modern Fintech 5-level scale:
+  /// Level 0 (None)  → #1F2433
+  /// Level 1 (Low)   → #3DDC97
+  /// Level 2 (Med)   → #FFD166
+  /// Level 3 (High)  → #FF8C42
+  /// Level 4 (Max)   → #FF4D4D
   static Color heatColorForIntensity({
     required Brightness brightness,
     required double intensity,
     required bool hasSpending,
   }) {
-    final baseColor = brightness == Brightness.dark
-        ? const Color(0xFF1E1E2C)
-        : const Color(0xFFF3F4F6);
-    if (!hasSpending) return baseColor;
+    if (!hasSpending) {
+      return brightness == Brightness.dark
+          ? const Color(0xFF1F2433)
+          : const Color(0xFFF0F2F5);
+    }
 
-    const stops = [
-      Color(0xFFE8F5E9), // very low
-      Color(0xFF81C784), // low
-      Color(0xFFFFD54F), // medium
-      Color(0xFFFF8A65), // high
-      Color(0xFFE53935), // very high
-    ];
-
-    final t = intensity.clamp(0.0, 1.0);
-    final segment = t * (stops.length - 1);
-    final idx = segment.floor().clamp(0, stops.length - 2);
-    final local = segment - idx;
-    return Color.lerp(stops[idx], stops[idx + 1], local) ?? stops.last;
+    if (intensity < 0.25) return const Color(0xFF3DDC97);
+    if (intensity < 0.50) return const Color(0xFFFFD166);
+    if (intensity < 0.75) return const Color(0xFFFF8C42);
+    return const Color(0xFFFF4D4D);
   }
 }
 
@@ -532,39 +517,59 @@ class _HeatmapLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
-    return Row(
-      children: [
-        Text(
-          'Less Spend',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-        const SizedBox(width: 8),
-        for (final intensity in const [0.0, 0.25, 0.5, 0.75, 1.0])
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: _HeatmapDayCell.heatColorForIntensity(
-                  brightness: brightness,
-                  intensity: intensity,
-                  hasSpending: true,
+    return Padding(
+      padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'Less Spend',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                 ),
-                borderRadius: BorderRadius.circular(4),
+          ),
+          const SizedBox(width: 12),
+          for (final labelAndIntensity in const [
+            MapEntry('No Spend', 0.0),
+            MapEntry('Low', 0.1),
+            MapEntry('Medium', 0.4),
+            MapEntry('High', 0.6),
+            MapEntry('Very High', 0.9),
+          ])
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: Tooltip(
+                message: labelAndIntensity.key,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: _HeatmapDayCell.heatColorForIntensity(
+                      brightness: brightness,
+                      intensity: labelAndIntensity.value,
+                      hasSpending: labelAndIntensity.value > 0,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
+                    border: labelAndIntensity.value == 0
+                        ? Border.all(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
+                          )
+                        : null,
+                  ),
+                ),
               ),
             ),
+          const SizedBox(width: 12),
+          Text(
+            'More Spend',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                ),
           ),
-        const Spacer(),
-        Text(
-          'More Spend',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

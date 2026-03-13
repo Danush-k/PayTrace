@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/utils/formatters.dart';
 import '../../core/utils/validators.dart';
 import '../../core/utils/qr_parser.dart';
 import '../../core/utils/merchant_detector.dart';
@@ -16,8 +15,6 @@ import '../../services/sms_service.dart';
 import 'app_picker_sheet.dart';
 import 'contact_picker_sheet.dart';
 import 'payment_status_screen.dart';
-import 'payment_sheet_screen.dart';
-import 'qr_scan_screen.dart';
 
 /// Main payment screen — handles all three flows:
 ///
@@ -888,258 +885,345 @@ class _PayScreenState extends ConsumerState<PayScreen>
   // ═══════════════════════════════════════════
 
   Widget _buildFormView(bool isDynamic) {
-    // Static QR: no amount field (detected from SMS)
-    // Dynamic QR: amount field shown (read-only)
-    // Manual entry: all fields shown
     final showAmountField = isDynamic || widget.qrData == null;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Form(
         key: _formKey,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Payee Card (QR mode)
-            if (widget.qrData != null) _buildPayeeCard(isDynamic),
-            if (widget.qrData != null) const SizedBox(height: 28),
-
-            // Amount Field — only for dynamic QR and manual entry
-            if (showAmountField) ...[
-              Text('Amount', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _amountController,
-                readOnly: _isAmountReadOnly,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d+\.?\d{0,2}')),
-                ],
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                decoration: InputDecoration(
-                  prefixText: '₹ ',
-                  prefixStyle:
-                      Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.primary,
-                          ),
-                  hintText: '0.00',
-                  suffixIcon: _isAmountReadOnly
-                      ? const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Icon(Icons.lock_rounded,
-                              size: 20, color: Colors.grey),
-                        )
-                      : null,
-                ),
-                validator: Validators.amount,
-                autofocus: !_isAmountReadOnly && widget.qrData != null,
-              ),
-              if (_isAmountReadOnly) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Amount is set by the QR code',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontSize: 12,
-                        color: Colors.grey,
+            // Top Section: Payee Card
+            if (widget.qrData != null) ...[
+              _buildPayeeHeader(widget.qrData!.payeeName, widget.qrData!.payeeAddress),
+              const SizedBox(height: 32),
+            ] else if (widget.paymentMode == AppConstants.modeContact && _nameController.text.isNotEmpty) ...[
+              _buildPayeeHeader(_nameController.text, _upiIdController.text),
+              const SizedBox(height: 32),
+            ] else if (widget.paymentMode == AppConstants.modeContact) ...[
+              InkWell(
+                onTap: _openContactPicker,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person_search_rounded, color: AppTheme.primary),
                       ),
-                ),
-              ],
-              const SizedBox(height: 24),
-            ],
-
-            // SMS auto-detect info chip — for static QR only
-            if (_isStaticQr) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.2),
+                      const SizedBox(width: 16),
+                      Text(
+                        'Select Contact to Pay',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                      ),
+                    ],
                   ),
                 ),
-                child: Row(
+              ),
+              const SizedBox(height: 32),
+            ] else ...[
+              // Full manual entry fields (if not starting from a contact or QR)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                ),
+                child: Column(
                   children: [
-                    Icon(Icons.sms_rounded,
-                        size: 20, color: AppTheme.primary.withValues(alpha: 0.8)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Amount detected automatically',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.primary,
-                                ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Enter amount in your UPI app — we\'ll read it from your bank\'s SMS',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.grey,
-                                ),
-                          ),
-                        ],
+                    TextFormField(
+                      controller: _upiIdController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: InputDecoration(
+                        labelText: 'Payee UPI ID',
+                        hintText: 'name@ybl',
+                        border: InputBorder.none,
+                        prefixIcon: const Icon(Icons.alternate_email_rounded, size: 20),
+                        contentPadding: const EdgeInsets.all(12),
                       ),
+                      validator: Validators.upiId,
+                      onChanged: (val) {
+                        setState(() {});
+                      },
+                    ),
+                    const Divider(height: 1),
+                    TextFormField(
+                      controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        labelText: 'Payee Name',
+                        hintText: 'Enter name',
+                        border: InputBorder.none,
+                        prefixIcon: const Icon(Icons.person_outline_rounded, size: 20),
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                      validator: Validators.payeeName,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
             ],
 
-            // Note Field
-            Text('Payment Note',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text(
-              'For your reference only',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontSize: 12,
+            // Giant Amount Section
+            if (showAmountField) ...[
+              TweenAnimationBuilder<double>(
+                tween: Tween<double>(
+                  begin: 1.0, 
+                  end: _amountController.text.isNotEmpty ? 1.05 : 1.0
+                ),
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                builder: (context, scale, child) {
+                  return Transform.scale(
+                    scale: scale,
+                    child: child,
+                  );
+                },
+                child: TextFormField(
+                  controller: _amountController,
+                  readOnly: _isAmountReadOnly,
+                  autofocus: !_isAmountReadOnly,
+                  textAlign: TextAlign.center,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}')),
+                  ],
+                  style: const TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
                   ),
-            ),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: _noteController,
-              maxLength: AppConstants.maxNoteLength,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                hintText: 'e.g., Rent for February',
-                prefixIcon: Icon(Icons.sticky_note_2_outlined, size: 20),
-              ),
-              validator: Validators.note,
-            ),
-
-            // UPI ID & Name (manual / contact entry)
-            if (widget.qrData == null) ...[
-              // Pick from Contacts button (contact mode)
-              if (widget.paymentMode == AppConstants.modeContact) ...[
-                InkWell(
-                  onTap: _openContactPicker,
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: AppTheme.primary.withValues(alpha: 0.25),
-                      ),
+                  decoration: InputDecoration(
+                    prefixText: '₹ ',
+                    prefixStyle: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.primary,
+                      letterSpacing: -1,
                     ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.contacts_rounded,
-                            color: AppTheme.primary, size: 22),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _nameController.text.isNotEmpty
-                                ? 'Paying ${_nameController.text}'
-                                : 'Pick from Contacts',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyLarge
-                                ?.copyWith(
-                                  color: AppTheme.primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                    hintText: '0',
+                    hintStyle: TextStyle(
+                      fontSize: 48,
+                      color: Colors.grey.withValues(alpha: 0.3),
+                    ),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  onChanged: (val) {
+                    setState(() {}); // Trigger the scale animation and button state
+                  },
+                  validator: (val) => _isStaticQr ? null : Validators.amount(val),
+                ),
+              ),
+              if (_isAmountReadOnly) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.lock_rounded, size: 14, color: Colors.grey),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Amount requested by payee',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
                           ),
-                        ),
-                        Icon(Icons.swap_horiz_rounded,
-                            color: AppTheme.primary.withValues(alpha: 0.6),
-                            size: 20),
-                      ],
                     ),
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 20),
               ],
-
-              const SizedBox(height: 24),
-              Text('Payee UPI ID',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _upiIdController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'name@ybl',
-                  prefixIcon: Icon(Icons.account_balance_wallet_outlined,
-                      size: 20),
-                ),
-                validator: Validators.upiId,
-              ),
-              const SizedBox(height: 16),
-              Text('Payee Name',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _nameController,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  hintText: 'Enter name',
-                  prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
-                ),
-                validator: Validators.payeeName,
-              ),
+              const SizedBox(height: 32),
             ],
 
-            const SizedBox(height: 40),
+            // Note Section
+            Center(
+              child: Container(
+                width: 200,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                     ? Colors.white.withValues(alpha: 0.05)
+                     : Colors.black.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: TextFormField(
+                  controller: _noteController,
+                  textAlign: TextAlign.center,
+                  maxLength: AppConstants.maxNoteLength,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+                  buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+                  decoration: InputDecoration(
+                    hintText: 'Add a note',
+                    hintStyle: TextStyle(
+                      color: Colors.grey.withValues(alpha: 0.8),
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  validator: Validators.note,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 48),
 
             // Proceed Button
             SizedBox(
               width: double.infinity,
-              height: 54,
-              child: ElevatedButton.icon(
-                onPressed: _onProceed,
-                icon: const Icon(Icons.arrow_forward_rounded, size: 20),
-                label: Text(
-                  _isAmountReadOnly && _amountController.text.isNotEmpty
-                      ? 'Pay ₹${_amountController.text}'
-                      : _isStaticQr
-                          ? 'Copy & Pay'
-                          : 'Proceed to Pay',
-                  style: const TextStyle(fontSize: 17),
+              height: 56,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: (_amountController.text.isNotEmpty || _isStaticQr || !_isAmountFreePayment) ? 1.0 : 0.4,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primary.withValues(alpha: 0.3),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      )
+                    ],
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF7B61FF), Color(0xFF4DA1FF)],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    ),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: (_amountController.text.isNotEmpty || _isStaticQr) ? _onProceed : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _isStaticQr
+                              ? 'Copy & Pay'
+                              : 'Proceed to Pay',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Scan QR option (manual mode only)
-            if (widget.qrData == null)
-              Center(
-                child: TextButton.icon(
-                  onPressed: () async {
-                    final qrData =
-                        await Navigator.of(context).push<QrPaymentData>(
-                      MaterialPageRoute(
-                          builder: (_) => const QrScanScreen()),
-                    );
-                    if (qrData != null && mounted) {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => PaymentSheetScreen(qrData: qrData),
-                        ),
-                      );
-                    }
-                  },
-                  icon:
-                      const Icon(Icons.qr_code_scanner_rounded, size: 18),
-                  label: const Text('Scan QR instead'),
-                ),
-              ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildPayeeHeader(String name, String upiId) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+            child: Text(
+              name.isNotEmpty ? name[0].toUpperCase() : '?',
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.3,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  upiId,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w500,
+                      ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          if (widget.qrData?.isDynamic == true)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppTheme.success.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.verified_rounded, size: 16, color: AppTheme.success),
+            ),
+        ],
       ),
     );
   }
@@ -1606,93 +1690,4 @@ class _PayScreenState extends ConsumerState<PayScreen>
     );
   }
 
-  Widget _buildPayeeCard(bool isDynamic) {
-    final qr = widget.qrData!;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.primary.withValues(alpha: 0.15),
-            AppTheme.primary.withValues(alpha: 0.05),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.3),
-        ),
-      ),
-      child: Column(
-        children: [
-          // QR type + Payee type badges
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDynamic
-                      ? AppTheme.success.withValues(alpha: 0.15)
-                      : AppTheme.warning.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  isDynamic ? '⚡ Dynamic QR' : '📷 Static QR',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isDynamic ? AppTheme.success : AppTheme.warning,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _buildPayeeTypeBadge(),
-            ],
-          ),
-          const SizedBox(height: 14),
-          // Payee avatar
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-            child: Text(
-              qr.payeeName.isNotEmpty
-                  ? qr.payeeName[0].toUpperCase()
-                  : '?',
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.primary,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            qr.payeeName,
-            style: Theme.of(context).textTheme.titleLarge,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            qr.payeeAddress,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (isDynamic && qr.amount != null) ...[
-            const SizedBox(height: 14),
-            Text(
-              Formatters.currency(qr.amount!),
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.primary,
-                  ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
