@@ -435,26 +435,31 @@ class TransactionDetailScreen extends ConsumerWidget {
                     // 1. Update this transaction's category
                     await db.updateTransactionCategory(transaction.id, cat);
 
-                    // 2. Persist the merchant → category mapping so future
-                    //    transactions from the same merchant use this category.
+                    // 2. Persist the merchant → category mapping using the
+                    //    unified merchantKey so future transactions from the
+                    //    same merchant use this category.
+                    final mKey = transaction.merchantKey;
                     await MerchantLearningService.learn(
                       db,
                       payeeName: transaction.payeeName,
                       upiId: transaction.payeeUpiId,
                       category: cat,
+                      merchantKey: mKey,
                     );
 
-                    final merchantKey = MerchantLearningService.normalizeKey(
-                      transaction.payeeName,
-                      transaction.payeeUpiId,
-                    );
+                    // 3. Also batch-update category on past transactions
+                    //    with the same merchantKey.
+                    if (mKey != null &&
+                        !mKey.startsWith('unknown::')) {
+                      await db.batchUpdateCategoryByMerchantKey(mKey, cat);
+                    }
 
                     if (context.mounted) {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Category saved. "$merchantKey" will always be "$cat".',
+                            'Category saved for "${transaction.payeeName}" → "$cat".',
                           ),
                           backgroundColor: AppTheme.success,
                           duration: const Duration(seconds: 3),
@@ -501,10 +506,37 @@ class TransactionDetailScreen extends ConsumerWidget {
   }
 
   /// Show dialog to edit the payee/payer name.
-  /// The edited name is saved to the payee record AND batch-updates
-  /// ALL past transactions with the same UPI ID.
+  ///
+  /// Behaviour differs based on whether the UPI ID is real or synthetic:
+  ///   - Real VPA (contains '@' with no synthetic prefix): batch-updates ALL
+  ///     transactions with the same UPI ID — the user is editing a known payee.
+  ///   - Synthetic IDs ('notif::*' or 'sms::*'): updates ONLY this transaction
+  ///     because the system could not identify the merchant and all unknowns
+  ///     would otherwise share the same UPI ID key.
   void _showEditNameDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController(text: transaction.payeeName);
+
+    // A synthetic/unidentifiable UPI ID means we cannot safely batch-rename
+    // because we don't know if all "notif::" or "sms::" transactions belong
+    // to the same real-world merchant.
+    //
+    // Additionally, phone-number VPAs (e.g. "9876543210@ybl") must also be
+    // treated as single-scope because the same number can be two different
+    // people. Only named merchant VPAs (alpha prefix) get batch rename.
+    final upiId = transaction.payeeUpiId;
+    final isSyntheticOrPhoneId = upiId.startsWith('notif::') ||
+        upiId.startsWith('sms::') ||
+        RegExp(r'^\d{8,}@').hasMatch(upiId);
+
+    final isPersonalKey =
+        transaction.merchantKey?.startsWith('personal::') ?? false;
+
+    // Single-scope: synthetic IDs and personal (phone-number) VPAs
+    final isSingleScope = isSyntheticOrPhoneId || isPersonalKey;
+
+    final scopeText = isSingleScope
+        ? 'The merchant could not be uniquely identified, so only this transaction will be renamed.'
+        : 'This will update the name on ALL transactions with the same merchant ID.';
 
     showDialog(
       context: context,
@@ -516,7 +548,7 @@ class TransactionDetailScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'This will update the name on all transactions with the same UPI ID.',
+              scopeText,
               style: Theme.of(ctx).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -547,22 +579,38 @@ class TransactionDetailScreen extends ConsumerWidget {
 
               final db = ref.read(databaseProvider);
 
-              // Batch-update ALL transactions with this UPI ID
-              await db.updateAllTransactionsPayeeName(
-                transaction.payeeUpiId, name);
-
-              // Also update the payee record so future imports reuse this name
-              final payee = await db.getPayeeByUpiId(transaction.payeeUpiId);
-              if (payee != null) {
-                await db.updatePayeeName(payee.id, name);
+              if (isSingleScope) {
+                // Scope: single transaction only
+                await db.updateTransactionPayeeName(transaction.id, name);
+              } else {
+                // Scope: all transactions with this merchant key (or UPI ID)
+                final mKey = transaction.merchantKey;
+                if (mKey != null &&
+                    !mKey.startsWith('unknown::') &&
+                    !mKey.startsWith('personal::')) {
+                  // Batch-update all transactions sharing the same merchantKey
+                  await db.updateAllTransactionsByMerchantKey(mKey, name);
+                } else {
+                  // Fallback: update by UPI ID (for legacy rows without merchantKey)
+                  await db.updateAllTransactionsPayeeName(upiId, name);
+                }
+                // Update the payee record so future imports reuse this name
+                final payee = await db.getPayeeByUpiId(upiId);
+                if (payee != null) {
+                  await db.updatePayeeName(payee.id, name);
+                }
               }
 
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {
-                Navigator.pop(context); // Pop detail screen to refresh
+                Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Updated name to "$name"'),
+                    content: Text(
+                      isSingleScope
+                          ? 'Transaction renamed to "$name"'
+                          : 'Updated name to "$name" for all matching transactions',
+                    ),
                     backgroundColor: AppTheme.success,
                   ),
                 );

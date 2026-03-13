@@ -320,6 +320,18 @@ class SmsService {
       // "to VPA person@bank" — extract VPA as fallback
       RegExp(r'(?:to|from)\s+(?:VPA\s+)?([a-zA-Z0-9._-]+@[a-zA-Z]+)',
           caseSensitive: false),
+      // HDFC/SBI: "UPI Ref No 412345/MERCHANT NAME" at end of string
+      RegExp(r'UPI\s+Ref\s+(?:No\.?)?\s*\d+/([A-Za-z][A-Za-z\s.]{1,40}?)(?:\s*$|\s*[|,.])',
+          caseSensitive: false),
+      // "Remarks: MERCHANT NAME" or "Remark: MERCHANT NAME" — Axis/Kotak style
+      RegExp(r'Remarks?\s*:\s*([A-Za-z][A-Za-z\s.0-9]{1,40}?)(?:\s*$|\s*[|,.])',
+          caseSensitive: false),
+      // "Info: VPA merchant@handle (MERCHANT NAME)" — parenthesized name
+      RegExp(r'VPA\s+[a-zA-Z0-9._-]+@[a-zA-Z]+\s+\(([A-Za-z][A-Za-z\s.]{1,40}?)\)',
+          caseSensitive: false),
+      // "trf to MERCHANT" or "transferred to MERCHANT" — direct name after transfer keyword
+      RegExp(r'(?:trf|transfer(?:red)?)\s+to\s+([A-Za-z][A-Za-z\s.]{1,40}?)(?:\s*$|\s*[|,.])',
+          caseSensitive: false),
     ];
 
     for (final pattern in patterns) {

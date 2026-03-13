@@ -130,6 +130,12 @@ class $TransactionsTable extends Transactions
       type: DriftSqlType.dateTime,
       requiredDuringInsert: false,
       defaultValue: currentDateAndTime);
+  static const VerificationMeta _merchantKeyMeta =
+      const VerificationMeta('merchantKey');
+  @override
+  late final GeneratedColumn<String> merchantKey = GeneratedColumn<String>(
+      'merchant_key', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   @override
   List<GeneratedColumn> get $columns => [
         id,
@@ -150,7 +156,8 @@ class $TransactionsTable extends Transactions
         category,
         direction,
         createdAt,
-        updatedAt
+        updatedAt,
+        merchantKey
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -263,6 +270,12 @@ class $TransactionsTable extends Transactions
       context.handle(_updatedAtMeta,
           updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
     }
+    if (data.containsKey('merchant_key')) {
+      context.handle(
+          _merchantKeyMeta,
+          merchantKey.isAcceptableOrUnknown(
+              data['merchant_key']!, _merchantKeyMeta));
+    }
     return context;
   }
 
@@ -310,6 +323,8 @@ class $TransactionsTable extends Transactions
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
       updatedAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
+      merchantKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}merchant_key']),
     );
   }
 
@@ -339,6 +354,11 @@ class Transaction extends DataClass implements Insertable<Transaction> {
   final String direction;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Stable merchant identifier built by [MerchantIdentity.buildKey].
+  /// Null for legacy rows imported before this column was introduced.
+  /// Formats: "mc::<code>" | "vpa::<upi>" | "name::<key>" | "unknown::<ms>"
+  final String? merchantKey;
   const Transaction(
       {required this.id,
       required this.payeeUpiId,
@@ -358,7 +378,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       required this.category,
       required this.direction,
       required this.createdAt,
-      required this.updatedAt});
+      required this.updatedAt,
+      this.merchantKey});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -395,6 +416,9 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     map['direction'] = Variable<String>(direction);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || merchantKey != null) {
+      map['merchant_key'] = Variable<String>(merchantKey);
+    }
     return map;
   }
 
@@ -431,6 +455,9 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       direction: Value(direction),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
+      merchantKey: merchantKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(merchantKey),
     );
   }
 
@@ -457,6 +484,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       direction: serializer.fromJson<String>(json['direction']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      merchantKey: serializer.fromJson<String?>(json['merchantKey']),
     );
   }
   @override
@@ -482,6 +510,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       'direction': serializer.toJson<String>(direction),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'merchantKey': serializer.toJson<String?>(merchantKey),
     };
   }
 
@@ -504,7 +533,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           String? category,
           String? direction,
           DateTime? createdAt,
-          DateTime? updatedAt}) =>
+          DateTime? updatedAt,
+          Value<String?> merchantKey = const Value.absent()}) =>
       Transaction(
         id: id ?? this.id,
         payeeUpiId: payeeUpiId ?? this.payeeUpiId,
@@ -529,6 +559,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
         direction: direction ?? this.direction,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        merchantKey: merchantKey.present ? merchantKey.value : this.merchantKey,
       );
   Transaction copyWithCompanion(TransactionsCompanion data) {
     return Transaction(
@@ -562,6 +593,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       direction: data.direction.present ? data.direction.value : this.direction,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      merchantKey:
+          data.merchantKey.present ? data.merchantKey.value : this.merchantKey,
     );
   }
 
@@ -586,7 +619,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ..write('category: $category, ')
           ..write('direction: $direction, ')
           ..write('createdAt: $createdAt, ')
-          ..write('updatedAt: $updatedAt')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('merchantKey: $merchantKey')
           ..write(')'))
         .toString();
   }
@@ -611,7 +645,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       category,
       direction,
       createdAt,
-      updatedAt);
+      updatedAt,
+      merchantKey);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -634,7 +669,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           other.category == this.category &&
           other.direction == this.direction &&
           other.createdAt == this.createdAt &&
-          other.updatedAt == this.updatedAt);
+          other.updatedAt == this.updatedAt &&
+          other.merchantKey == this.merchantKey);
 }
 
 class TransactionsCompanion extends UpdateCompanion<Transaction> {
@@ -657,6 +693,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
   final Value<String> direction;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
+  final Value<String?> merchantKey;
   final Value<int> rowid;
   const TransactionsCompanion({
     this.id = const Value.absent(),
@@ -678,6 +715,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.direction = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.merchantKey = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TransactionsCompanion.insert({
@@ -700,6 +738,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.direction = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
+    this.merchantKey = const Value.absent(),
     this.rowid = const Value.absent(),
   })  : id = Value(id),
         payeeUpiId = Value(payeeUpiId),
@@ -727,6 +766,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     Expression<String>? direction,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
+    Expression<String>? merchantKey,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -749,6 +789,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       if (direction != null) 'direction': direction,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
+      if (merchantKey != null) 'merchant_key': merchantKey,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -773,6 +814,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       Value<String>? direction,
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt,
+      Value<String?>? merchantKey,
       Value<int>? rowid}) {
     return TransactionsCompanion(
       id: id ?? this.id,
@@ -794,6 +836,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       direction: direction ?? this.direction,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      merchantKey: merchantKey ?? this.merchantKey,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -858,6 +901,9 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     if (updatedAt.present) {
       map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
+    if (merchantKey.present) {
+      map['merchant_key'] = Variable<String>(merchantKey.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -886,6 +932,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
           ..write('direction: $direction, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
+          ..write('merchantKey: $merchantKey, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1025,6 +1072,10 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
 
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+        {upiId},
+      ];
   @override
   Payee map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
@@ -1958,6 +2009,7 @@ typedef $$TransactionsTableCreateCompanionBuilder = TransactionsCompanion
   Value<String> direction,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<String?> merchantKey,
   Value<int> rowid,
 });
 typedef $$TransactionsTableUpdateCompanionBuilder = TransactionsCompanion
@@ -1981,6 +2033,7 @@ typedef $$TransactionsTableUpdateCompanionBuilder = TransactionsCompanion
   Value<String> direction,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
+  Value<String?> merchantKey,
   Value<int> rowid,
 });
 
@@ -2051,6 +2104,9 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => ColumnFilters(column));
 }
 
 class $$TransactionsTableOrderingComposer
@@ -2122,6 +2178,9 @@ class $$TransactionsTableOrderingComposer
 
   ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => ColumnOrderings(column));
 }
 
 class $$TransactionsTableAnnotationComposer
@@ -2189,6 +2248,9 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => column);
 }
 
 class $$TransactionsTableTableManager extends RootTableManager<
@@ -2236,6 +2298,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<String> direction = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
+            Value<String?> merchantKey = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TransactionsCompanion(
@@ -2258,6 +2321,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             direction: direction,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            merchantKey: merchantKey,
             rowid: rowid,
           ),
           createCompanionCallback: ({
@@ -2280,6 +2344,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<String> direction = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
+            Value<String?> merchantKey = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               TransactionsCompanion.insert(
@@ -2302,6 +2367,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             direction: direction,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            merchantKey: merchantKey,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

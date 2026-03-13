@@ -53,6 +53,11 @@ class Transactions extends Table {
   DateTimeColumn get updatedAt =>
       dateTime().withDefault(currentDateAndTime)();
 
+  /// Stable merchant identifier built by [MerchantIdentity.buildKey].
+  /// Null for legacy rows imported before this column was introduced.
+  /// Formats: "mc::<code>" | "vpa::<upi>" | "name::<key>" | "unknown::<ms>"
+  TextColumn get merchantKey => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }

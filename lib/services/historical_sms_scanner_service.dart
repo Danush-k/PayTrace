@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/utils/merchant_identity.dart';
 import '../core/utils/sms_transaction_parser.dart';
 import '../data/database/app_database.dart';
 import 'contact_lookup_service.dart';
@@ -444,15 +445,22 @@ class HistoricalSmsScannerService {
         sender: sender,
       );
 
+      // Build stable merchant key FIRST — needed for category lookup
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+      );
+
       final category = parsed.isIncome
           ? 'Income'
           : await MerchantLearningService.categorize(
               db,
               payeeName: payeeName,
               upiId: payeeUpiId,
+              merchantKey: mKey,
             );
 
-      // ── 7. Insert transaction ─────────────────────────────────────────
+      // ── 7. Insert transaction ─────────────────────────────────────
       final id = _uuid.v4();
       await db.insertTransaction(TransactionsCompanion(
         id: Value(id),
@@ -468,6 +476,7 @@ class HistoricalSmsScannerService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),
         transactionNote: Value(_extractNote(body)),
         createdAt: Value(timestamp),
         updatedAt: Value(DateTime.now()),
@@ -531,9 +540,9 @@ class HistoricalSmsScannerService {
   }
 
   /// Resolve the best display name for a payee:
-  ///   1. Device contact lookup via UPI ID
-  ///   2. Existing payee record in DB
-  ///   3. Parser-extracted merchant name
+  ///   1. Parser-extracted merchant name (most specific for this SMS)
+  ///   2. Existing payee record in DB (user may have edited it)
+  ///   3. Device contact lookup (only for phone-number VPAs)
   ///   4. Cleaned sender ID
   static Future<String> _resolvePayeeName({
     required AppDatabase db,
@@ -541,22 +550,30 @@ class HistoricalSmsScannerService {
     required String payeeUpiId,
     required String sender,
   }) async {
-    // 1. Device contacts (preloaded earlier)
-    final contactName =
-        await ContactLookupService.lookupFromUpiId(payeeUpiId);
-    if (contactName != null && contactName.isNotEmpty) return contactName;
+    // 1. Parser-extracted merchant name (skip bank names)
+    if (parsedMerchant.isNotEmpty && !_kBankNames.contains(parsedMerchant)) {
+      return parsedMerchant;
+    }
 
     // 2. Existing payee in DB
     final existingPayee = await db.getPayeeByUpiId(payeeUpiId);
     if (existingPayee != null && existingPayee.name.isNotEmpty) {
-      if (!_kBankNames.contains(existingPayee.name)) {
+      if (!_kBankNames.contains(existingPayee.name) &&
+          existingPayee.name != 'Unknown' &&
+          !existingPayee.name.startsWith('Payment via ')) {
         return existingPayee.name;
       }
     }
 
-    // 3. Parser-extracted merchant name
-    if (parsedMerchant.isNotEmpty && !_kBankNames.contains(parsedMerchant)) {
-      return parsedMerchant;
+    // 3. Device contacts (only for phone-number VPAs)
+    final localPart = payeeUpiId.contains('@')
+        ? payeeUpiId.split('@').first
+        : payeeUpiId;
+    final isPhoneVpa = RegExp(r'^\d{8,}$').hasMatch(localPart);
+    if (isPhoneVpa) {
+      final contactName =
+          await ContactLookupService.lookupFromUpiId(payeeUpiId);
+      if (contactName != null && contactName.isNotEmpty) return contactName;
     }
 
     // 4. Fallback: cleaned sender ID

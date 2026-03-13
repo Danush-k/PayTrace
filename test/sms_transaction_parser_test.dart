@@ -785,4 +785,195 @@ void main() {
       expect(json['confidence'], isA<double>());
     });
   });
+
+  // ═══════════════════════════════════════════════════════
+  //  ICICI BANK — semicolon format with UPI:NNNN ref
+  // ═══════════════════════════════════════════════════════
+
+  group('ICICI Bank semicolon format', () {
+    test('ICICI debit — "; NAME credited" with UPI:ref', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'ICICI Bank Acct XX131 debited for Rs 130.00 on 08-Mar-26; '
+            'Saravana Hotel credited. UPI:606736706551.',
+        sender: 'AD-ICICIT',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 130.00);
+      expect(result.type, 'expense');
+      expect(result.merchant, 'Saravana Hotel');
+      expect(result.upiRef, '606736706551');
+      expect(result.accountHint, '131');
+    });
+
+    test('ICICI debit — "; NAME credited" with suffixed sender ICICIT-S', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'ICICI Bank Acct XX457 debited for Rs 250.00 on 10-Mar-26; '
+            'Ajay Kumar Yada credited. UPI:712345678901.',
+        sender: 'AD-ICICIT-S',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 250.00);
+      expect(result.type, 'expense');
+      expect(result.merchant, 'Ajay Kumar Yada');
+      expect(result.upiRef, '712345678901');
+      expect(result.accountHint, '457');
+    });
+
+    test('ICICI credit — "; NAME debited" (received money)', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'ICICI Bank Acct XX131 credited for Rs 500.00 on 09-Mar-26; '
+            'Rahul Sharma debited. UPI:812345678901.',
+        sender: 'AD-ICICIT',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 500.00);
+      expect(result.type, 'income');
+      expect(result.merchant, 'Rahul Sharma');
+      expect(result.upiRef, '812345678901');
+    });
+
+    test('ICICI debit — 4-digit account hint', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'ICICI Bank Acct XX4321 debited for Rs 75.00 on 07-Mar-26; '
+            'Tea Stall credited. UPI:912345678901.',
+        sender: 'AD-ICICIT',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 75.00);
+      expect(result.merchant, 'Tea Stall');
+      expect(result.accountHint, '4321');
+    });
+
+    test('ICICI — merchant with dots and special chars', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'ICICI Bank Acct XX999 debited for Rs 1,200.00 on 05-Mar-26; '
+            "S.K. Pharma D'Cruz credited. UPI:112345678901.",
+        sender: 'AD-ICICIT',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 1200.00);
+      expect(result.type, 'expense');
+      expect(result.merchant, isNotNull);
+      expect(result.merchant.length, greaterThan(2));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  GENERIC SEMICOLON FORMAT — works for any bank
+  // ═══════════════════════════════════════════════════════
+
+  group('Generic semicolon format (any bank)', () {
+    test('Unknown bank — semicolon credited pattern', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'Your A/c XX5678 debited for Rs 300.00 on 08-Mar-26; '
+            'Fresh Mart credited. UPI Ref No 512345678901.',
+        sender: 'VM-GENBNK',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 300.00);
+      expect(result.type, 'expense');
+      expect(result.merchant, 'Fresh Mart');
+    });
+
+    test('SBI — semicolon format if ever used', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'SBI Acct XX1234 debited Rs 450.00 on 08-Mar-26; '
+            'Grocery Store credited. UPI:112345678902.',
+        sender: 'BK-SBIINB',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.amount, 450.00);
+      expect(result.merchant, 'Grocery Store');
+      expect(result.upiRef, '112345678902');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  UPI: bare ref and Acct hint patterns
+  // ═══════════════════════════════════════════════════════
+
+  group('UPI bare ref and Acct hint', () {
+    test('UPI:NNNN ref pattern (no "Ref No" prefix)', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'Rs 200.00 debited from A/c XX9876. '
+            'Paid to AMIT via UPI. UPI:998877665544.',
+        sender: 'BK-HDFCBK',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.upiRef, '998877665544');
+    });
+
+    test('Acct XX with 3 digits', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'Your Acct XX789 debited Rs 100.00 for UPI txn to Shop. '
+            'Ref No 123456789012.',
+        sender: 'AD-AXISBK',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.accountHint, '789');
+    });
+
+    test('Acct XX with 4 digits', () {
+      final result = SmsTransactionParser.parse(
+        body:
+            'Your Acct XX7890 debited Rs 100.00 for UPI txn to Shop. '
+            'Ref No 123456789012.',
+        sender: 'AD-AXISBK',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.accountHint, '7890');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════
+  //  FALLBACK — suffixed senders resolve to bank name
+  // ═══════════════════════════════════════════════════════
+
+  group('Sender fallback with suffixes', () {
+    test('ICICIT-S falls back to ICICI Bank (not raw sender)', () {
+      // When no merchant name is extractable from body, fallback should
+      // return "ICICI Bank" not "ICICIT-S"
+      final result = SmsTransactionParser.parse(
+        body:
+            'Rs 50 debited from your account via UPI. '
+            'Ref No 212345678901.',
+        sender: 'AD-ICICIT-S',
+        timestamp: now,
+      );
+
+      expect(result, isNotNull);
+      // Even without a merchant pattern match, the fallback bank name
+      // should be "ICICI Bank" not "ICICIT-S"
+      expect(result!.merchant, isNot(contains('ICICIT')));
+    });
+  });
 }

@@ -145,6 +145,7 @@ class SmsTransactionParser {
     'AXISBK',
     'HDFCBK',
     'ICICIB',
+    'ICICIT',
     'SBIBNK',
     'SBIINB',
     'SBINOB',
@@ -157,6 +158,11 @@ class SmsTransactionParser {
     'BOBSMS',
     'INDBNK',
     'IDFCFB',
+    'YESBNK',
+    'FEDBKN',
+    'BOIIND',
+    'UCOBNK',
+    'IABORB',
   };
 
   /// Promotional / spam keywords — if ANY of these appear we
@@ -273,7 +279,8 @@ class SmsTransactionParser {
     // they boost confidence but are not required.
     final isWhitelistedSender =
         _financialSenderWhitelist.contains(normalizedSender) ||
-        _financialSenderWhitelist.any(normalizedSender.contains);
+        _financialSenderWhitelist.any(normalizedSender.contains) ||
+        _financialSenderWhitelist.any((code) => normalizedSender.startsWith(code));
     final hasBankingKeyword =
         _bankingKeywords.any((kw) => lower.contains(kw));
 
@@ -597,6 +604,36 @@ class SmsTransactionParser {
   ///   6. Bare VPA as fallback: "to person@ybl"
   static String? _extractMerchant(String text) {
     final patterns = [
+      // ── P0a: "; NAME credited" — ICICI and similar banks ──
+      // "debited for Rs 130.00 on 08-Mar-26; Saravana Hotel credited."
+      _NamePattern(
+        RegExp(
+          r";\s*([A-Za-z][A-Za-z\s.&'-]{2,40})\s+credited",
+          caseSensitive: false,
+        ),
+        cleanup: true,
+      ),
+
+      // ── P0b: "; NAME debited" — ICICI credit (reverse) ──
+      // "credited for Rs 500.00 on 08-Mar-26; Rahul Kumar debited."
+      _NamePattern(
+        RegExp(
+          r";\s*([A-Za-z][A-Za-z\s.&'-]{2,40})\s+debited",
+          caseSensitive: false,
+        ),
+        cleanup: true,
+      ),
+
+      // ── P0c: "credited to NAME." — name right after "credited to" ──
+      // Only match when followed by a proper name (uppercase start, no "your/my/the")
+      _NamePattern(
+        RegExp(
+          r"credited\s+to\s+(?!your\b|my\b|the\b|a/c\b|acct\b|account\b)([A-Z][A-Za-z\s.&'-]{2,40})(?:\.|;|\s+UPI|\s+Ref|$)",
+          caseSensitive: false,
+        ),
+        cleanup: true,
+      ),
+
       // ── P1: UPI Info field ──
       // "Info: UPI/P2P/412345678901/JOHN DOE/person@ybl/SBI"
       _NamePattern(
@@ -778,6 +815,7 @@ class SmsTransactionParser {
       'SBINOB': 'SBI',
       'HDFCBK': 'HDFC Bank',
       'ICICIB': 'ICICI Bank',
+      'ICICIT': 'ICICI Bank',
       'AXISBK': 'Axis Bank',
       'KOTAKB': 'Kotak Bank',
       'PNBSMS': 'PNB',
@@ -792,7 +830,13 @@ class SmsTransactionParser {
       'IDFCFB': 'IDFC First',
       'PAYTMB': 'Paytm',
     };
-    return bankMap[clean] ?? clean;
+    // Exact match first
+    if (bankMap.containsKey(clean)) return bankMap[clean]!;
+    // startsWith match for suffixed senders like ICICIT-S → ICICIT
+    for (final entry in bankMap.entries) {
+      if (clean.startsWith(entry.key)) return entry.value;
+    }
+    return clean;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -811,10 +855,15 @@ class SmsTransactionParser {
       RegExp(r'UPI\s*(?:Ref|ref)\.?\s*(?:No|no)?\.?\s*:?\s*(\d{8,14})',
           caseSensitive: false),
       RegExp(r'UPI/\w+/(\d{8,14})', caseSensitive: false),
+      // "UPI:606736706551" — bare numeric UPI reference (ICICI style)
+      RegExp(r'UPI\s*:\s*(\d{8,14})', caseSensitive: false),
       RegExp(r'Ref\s*(?:No|no)?\.?\s*:?\s*(\d{8,14})',
           caseSensitive: false),
       RegExp(r'TxnId\s*:?\s*(\d{8,14})', caseSensitive: false),
       RegExp(r'Txn\s*(?:No|no)?\.?\s*:?\s*(\d{8,14})',
+          caseSensitive: false),
+      // "IMPS Ref 312345678901" or "NEFT Ref 312345678901"
+      RegExp(r'(?:IMPS|NEFT|RTGS)\s*(?:Ref|ref)\.?\s*(?:No|no)?\.?\s*:?\s*(\d{8,14})',
           caseSensitive: false),
     ];
 
@@ -837,9 +886,13 @@ class SmsTransactionParser {
   /// - "account ending 1234"
   static String? _extractAccountHint(String text) {
     final patterns = [
-      RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{4})\b'),
-      RegExp(r'account\s+(?:ending|no\.?)\s*[*xX]*(\d{4})\b',
+      RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+      // "Acct XX131" or "Acct XX1234" — ICICI and others use "Acct"
+      RegExp(r'[Aa]cct?\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+      RegExp(r'account\s+(?:ending|no\.?)\s*[*xX]*(\d{3,4})\b',
           caseSensitive: false),
+      // "A/c ending 1234" or "a/c ...1234"
+      RegExp(r'[Aa]/[Cc]\s+ending\s+[*xX]*(\d{3,4})\b'),
     ];
 
     for (final p in patterns) {

@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/database/app_database.dart';
+import '../core/utils/merchant_identity.dart';
 import '../core/utils/sms_transaction_parser.dart';
 import 'contact_lookup_service.dart';
 import 'merchant_learning_service.dart';
@@ -242,8 +243,18 @@ class SmsSyncService {
       }
 
       // ═══ Resolve payee info ═══
-      final payeeUpiId = _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
+      // Bug 10 fix: never store a bare bank name ('SBI', 'HDFC Bank') as the
+      // payeeUpiId. Prefix with 'sms::' so it is clearly synthetic and is
+      // never confused with a real UPI VPA.
+      final payeeUpiId =
+          _extractUpiId(sms.body) ?? 'sms::${_sanitizeSender(sms.sender)}';
       final payeeName = await _resolvePayeeName(db, sms, payeeUpiId);
+
+      // Build stable merchant key FIRST — needed for category lookup
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+      );
 
       // ═══ Auto-categorize ═══
       final category = sms.isCredit
@@ -252,6 +263,7 @@ class SmsSyncService {
               db,
               payeeName: payeeName,
               upiId: payeeUpiId,
+              merchantKey: mKey,
             );
 
       // ═══ Insert transaction ═══
@@ -271,6 +283,7 @@ class SmsSyncService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),
         transactionNote: Value(note),
         createdAt: Value(sms.timestamp),
         updatedAt: Value(DateTime.now()),
@@ -292,47 +305,56 @@ class SmsSyncService {
 
   /// Resolve the best payee/payer name from SMS.
   /// Priority:
-  ///   1. Contact lookup (phone number from UPI ID → device contacts)
-  ///   2. Existing payee in DB (user may have edited it before)
-  ///   3. Name extracted from SMS body (skip bank names)
+  ///   1. Name extracted from SMS body — most accurate for the specific txn
+  ///      (skip if it resolved to the user's own bank name)
+  ///   2. Existing payee alias in DB — only if user previously set a good name
+  ///      AND the current SMS name is unknown/generic
+  ///   3. Contact lookup (only for phone-number VPAs)
   ///   4. UPI ID local part → readable name
   ///   5. Phone number from UPI ID
-  ///   6. Raw UPI ID / "Unknown"
+  ///   6. "Unknown"
   static Future<String> _resolvePayeeName(
     AppDatabase db,
     BankSms sms,
     String payeeUpiId,
   ) async {
-    // 1. Contact lookup — extract phone from UPI ID and match contacts
-    final contactName = await ContactLookupService.lookupFromUpiId(payeeUpiId);
-    if (contactName != null && contactName.isNotEmpty) {
-      debugPrint('PayTrace SMS Sync: Name from CONTACTS → $contactName');
-      return contactName;
+    // 1. Name extracted from SMS body — best signal: specific to this txn
+    if (sms.payeeName != null &&
+        sms.payeeName!.isNotEmpty &&
+        !_bankNames.contains(sms.payeeName!)) {
+      debugPrint('PayTrace SMS Sync: Name from SMS body → ${sms.payeeName}');
+      return sms.payeeName!;
     }
 
-    // 2. Existing payee in DB (user may have manually edited the name before)
+    // 2. Existing payee in DB — only reuse if the stored name is a real alias
+    //    (not a bank code or generic placeholder)
     final existingPayee = await db.getPayeeByUpiId(payeeUpiId);
-    if (existingPayee != null && existingPayee.name.isNotEmpty) {
-      // Don't reuse bank-code names (like "SBI", "HDFC Bank")
-      if (!_bankNames.contains(existingPayee.name)) {
-        debugPrint('PayTrace SMS Sync: Name from DB → ${existingPayee.name}');
-        return existingPayee.name;
+    if (existingPayee != null &&
+        existingPayee.name.isNotEmpty &&
+        !_bankNames.contains(existingPayee.name) &&
+        existingPayee.name != 'Unknown' &&
+        !existingPayee.name.startsWith('Payment via ')) {
+      debugPrint('PayTrace SMS Sync: Name from DB → ${existingPayee.name}');
+      return existingPayee.name;
+    }
+
+    // 3. Contact lookup — ONLY for phone-number VPAs
+    //    Avoid overriding a good merchant name from SMS with a contact name.
+    final localPart = payeeUpiId.contains('@')
+        ? payeeUpiId.split('@').first
+        : payeeUpiId;
+    final isPhoneVpa = RegExp(r'^\d{8,}$').hasMatch(localPart);
+    if (isPhoneVpa) {
+      final contactName = await ContactLookupService.lookupFromUpiId(payeeUpiId);
+      if (contactName != null && contactName.isNotEmpty) {
+        debugPrint('PayTrace SMS Sync: Name from CONTACTS → $contactName');
+        return contactName;
       }
     }
 
-    // 3. Name extracted from SMS body (e.g., "to JOHN DOE via UPI")
-    //    Skip if it resolved to the user's own bank name.
-    if (sms.payeeName != null && sms.payeeName!.isNotEmpty) {
-      if (!_bankNames.contains(sms.payeeName!)) {
-        return sms.payeeName!;
-      }
-    }
-
-    // 4. UPI ID → readable name (use payeeUpiId directly)
+    // 4. UPI ID local part → readable name
     if (payeeUpiId.contains('@')) {
-      final localPart = payeeUpiId.split('@').first;
-      // If local part has letters, convert to readable name
-      if (RegExp(r'[a-zA-Z]').hasMatch(localPart)) {
+      if (!isPhoneVpa && localPart.length >= 2) {
         final name = localPart
             .replaceAll(RegExp(r'[._-]'), ' ')
             .split(' ')
@@ -342,15 +364,12 @@ class SmsSyncService {
             .join(' ');
         if (name.length >= 2) return name;
       }
-      // 5. Phone-based UPI ID (e.g., "9876543210@ybl") — show the number
-      if (RegExp(r'^\d{10,}$').hasMatch(localPart)) {
-        return localPart;
-      }
-      // 6. Return raw UPI ID rather than bank name
+      // 5. Phone-number VPA: show the number
+      if (isPhoneVpa) return localPart;
       return payeeUpiId;
     }
 
-    // No UPI ID found — avoid showing the user's own bank name
+    // 6. Truly unknown
     return 'Unknown';
   }
 
@@ -373,6 +392,7 @@ class SmsSyncService {
       'SBINOB': 'SBI',
       'HDFCBK': 'HDFC Bank',
       'ICICIB': 'ICICI Bank',
+      'ICICIT': 'ICICI Bank',
       'AXISBK': 'Axis Bank',
       'KOTAKB': 'Kotak Bank',
       'PNBSMS': 'PNB',
@@ -388,7 +408,12 @@ class SmsSyncService {
       'PAYTMB': 'Paytm',
     };
 
+    // Exact match first
     if (bankMap.containsKey(clean)) return bankMap[clean]!;
+    // startsWith match for suffixed senders like ICICIT-S → ICICIT
+    for (final entry in bankMap.entries) {
+      if (clean.startsWith(entry.key)) return entry.value;
+    }
     return clean;
   }
 
@@ -578,10 +603,19 @@ class SmsSyncService {
       }
 
       // ═══ Resolve payee info ═══
+      // Bug 10 fix: never store a bare bank name as the payeeUpiId.
       final payeeUpiId =
-          parsed.upiId ?? _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
+          parsed.upiId ??
+          _extractUpiId(sms.body) ??
+          'sms::${_sanitizeSender(sms.sender)}';
       final payeeName =
-          await _resolvePayeeName(db, sms, payeeUpiId) ;
+          await _resolvePayeeName(db, sms, payeeUpiId);
+
+      // Build stable merchant key FIRST — needed for category lookup
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+      );
 
       // Use the parser's category (it already called CategoryEngine)
       // but allow _resolvePayeeName to provide a better name.
@@ -591,6 +625,7 @@ class SmsSyncService {
               db,
               payeeName: payeeName,
               upiId: payeeUpiId,
+              merchantKey: mKey,
             );
 
       final id = _uuid.v4();
@@ -610,6 +645,7 @@ class SmsSyncService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),
         transactionNote: Value(note),
         createdAt: Value(parsed.timestamp),
         updatedAt: Value(DateTime.now()),
@@ -639,7 +675,7 @@ class SmsSyncService {
         if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms);
       }
     } catch (_) {}
-    return DateTime.now().subtract(const Duration(days: 90));
+    return DateTime.now().subtract(const Duration(days: 30));
   }
 
   /// Save the last sync timestamp.

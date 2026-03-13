@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../data/database/app_database.dart';
 import '../core/constants/app_constants.dart';
+import '../core/utils/merchant_identity.dart';
 import '../core/utils/recurring_detector.dart';
 import '../services/upi_service.dart';
 import '../services/notification_service.dart';
@@ -362,11 +363,18 @@ class PaymentNotifier extends StateNotifier<PaymentState> {
     final txnRef = UpiService.generateTxnRef();
     final amount = state.amount ?? 0;
 
-    // Auto-categorize the transaction
+    // Build stable merchant key for grouping and category learning
+    final mKey = MerchantIdentity.buildKey(
+      upiId: state.payeeUpiId!,
+      payeeName: state.payeeName ?? '',
+    );
+
+    // Auto-categorize the transaction (using unified merchantKey)
     final category = await MerchantLearningService.categorize(
       _db,
       payeeName: state.payeeName ?? '',
       upiId: state.payeeUpiId!,
+      merchantKey: mKey,
     );
 
     // Step 1: Pre-log as INITIATED
@@ -383,6 +391,7 @@ class PaymentNotifier extends StateNotifier<PaymentState> {
       upiApp: Value(state.selectedApp!.packageName),
       upiAppName: Value(state.selectedApp!.appName),
       category: Value(category),
+      merchantKey: Value(mKey),
     ));
 
     state = state.copyWith(
@@ -461,6 +470,7 @@ class PaymentNotifier extends StateNotifier<PaymentState> {
         upiId: Value(state.payeeUpiId!),
         name: Value(state.payeeName ?? state.payeeUpiId!),
         lastPaidAt: Value(DateTime.now()),
+        lastTransactionAt: Value(DateTime.now()), // Bug 9 fix
         transactionCount: const Value(1),
       ));
     }

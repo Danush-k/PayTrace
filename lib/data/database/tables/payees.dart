@@ -24,4 +24,11 @@ class Payees extends Table {
 
   @override
   Set<Column> get primaryKey => {id};
+
+  /// Enforce uniqueness on upiId so concurrent inserts from SMS sync
+  /// and the notification pipeline cannot create duplicate payee rows.
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {upiId},
+  ];
 }
