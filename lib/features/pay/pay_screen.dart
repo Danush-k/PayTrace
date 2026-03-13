@@ -962,12 +962,12 @@ class _PayScreenState extends ConsumerState<PayScreen>
                     TextFormField(
                       controller: _upiIdController,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         labelText: 'Payee UPI ID',
                         hintText: 'name@ybl',
                         border: InputBorder.none,
-                        prefixIcon: const Icon(Icons.alternate_email_rounded, size: 20),
-                        contentPadding: const EdgeInsets.all(12),
+                        prefixIcon: Icon(Icons.alternate_email_rounded, size: 20),
+                        contentPadding: EdgeInsets.all(12),
                       ),
                       validator: Validators.upiId,
                       onChanged: (val) {
@@ -978,12 +978,12 @@ class _PayScreenState extends ConsumerState<PayScreen>
                     TextFormField(
                       controller: _nameController,
                       textCapitalization: TextCapitalization.words,
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         labelText: 'Payee Name',
                         hintText: 'Enter name',
                         border: InputBorder.none,
-                        prefixIcon: const Icon(Icons.person_outline_rounded, size: 20),
-                        contentPadding: const EdgeInsets.all(12),
+                        prefixIcon: Icon(Icons.person_outline_rounded, size: 20),
+                        contentPadding: EdgeInsets.all(12),
                       ),
                       validator: Validators.payeeName,
                     ),

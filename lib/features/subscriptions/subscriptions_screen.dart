@@ -204,7 +204,7 @@ class SubscriptionsScreen extends ConsumerWidget {
                                     ),
                                     child: Text(
                                       '/ ${sub.frequency.toLowerCase().replaceAll('ly', '')}',
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
                                         color: AppTheme.primary,

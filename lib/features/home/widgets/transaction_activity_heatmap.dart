@@ -114,8 +114,9 @@ class _TransactionActivityHeatmapState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Activity Heatmap',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          'Spending Activity',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.5,
                               ),
@@ -123,7 +124,8 @@ class _TransactionActivityHeatmapState
                         const SizedBox(height: 4),
                         Text(
                           'Daily spending intensity',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
                                 color: Colors.grey.shade500,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -195,9 +197,9 @@ class _TransactionActivityHeatmapState
               Text(
                 Formatters.dateShort(day),
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
+                ),
               ),
               const SizedBox(height: 18),
               Row(
@@ -230,9 +232,9 @@ class _TransactionActivityHeatmapState
                 const SizedBox(height: 16),
                 Text(
                   'Categories',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 10),
                 Wrap(
@@ -240,17 +242,23 @@ class _TransactionActivityHeatmapState
                   runSpacing: 8,
                   children: stats.categories.map((cat) {
                     return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).brightness == Brightness.dark 
-                           ? Colors.white.withValues(alpha: 0.1) 
-                           : Colors.black.withValues(alpha: 0.05),
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         cat,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                      )
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     );
                   }).toList(),
                 ),
@@ -285,7 +293,9 @@ class _HeatmapMonthPage extends ConsumerWidget {
       switchInCurve: Curves.easeOutCubic,
       switchOutCurve: Curves.easeInCubic,
       child: KeyedSubtree(
-        key: ValueKey('${month.year}-${month.month}-${transactionsAsync.hashCode}'),
+        key: ValueKey(
+          '${month.year}-${month.month}-${transactionsAsync.hashCode}',
+        ),
         child: transactionsAsync.when(
           data: (transactions) {
             final dailyStats = _buildDailyStats(transactions);
@@ -338,20 +348,19 @@ class _HeatmapMonthContent extends StatelessWidget {
             child: Text(
               label,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.55),
-                  ),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.55),
+              ),
             ),
           ),
         ),
-      for (int i = 0; i < leadingEmptyCells; i++)
-        const SizedBox.shrink(),
+      for (int i = 0; i < leadingEmptyCells; i++) const SizedBox.shrink(),
       for (int day = 1; day <= daysInMonth; day++)
         _HeatmapDayCell(
           date: DateTime(month.year, month.month, day),
-          stats: dailyStats[DateTime(month.year, month.month, day)] ??
+          stats:
+              dailyStats[DateTime(month.year, month.month, day)] ??
               const _HeatmapDayStats.empty(),
           maxValue: maxValue,
           isSelected: _isSameDay(
@@ -376,17 +385,17 @@ class _HeatmapMonthContent extends StatelessWidget {
           children: [
             Text(
               Formatters.monthYear(month),
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const Spacer(),
             Text(
               'Spending heatmap',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w700,
-                  ),
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -453,7 +462,9 @@ class _HeatmapDayCell extends StatelessWidget {
             border: Border.all(
               color: isSelected
                   ? selectedBorderColor
-                  : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.05),
+                  : Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.05),
               width: isSelected ? 2.0 : 1.0,
             ),
             boxShadow: (isSelected || (value > 0 && intensity > 0.6))
@@ -470,16 +481,19 @@ class _HeatmapDayCell extends StatelessWidget {
             child: Text(
               '${date.day}',
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: value > 0
-                        ? (intensity > 0.4
-                            ? Colors.white
-                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.8))
-                        : Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.35),
-                    fontWeight: value > 0 && intensity > 0.4 ? FontWeight.bold : FontWeight.w600,
-                  ),
+                color: value > 0
+                    ? (intensity > 0.4
+                          ? Colors.white
+                          : Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.8))
+                    : Theme.of(
+                        context,
+                      ).colorScheme.onSurface.withValues(alpha: 0.35),
+                fontWeight: value > 0 && intensity > 0.4
+                    ? FontWeight.bold
+                    : FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -525,9 +539,11 @@ class _HeatmapLegend extends StatelessWidget {
           Text(
             'Less Spend',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
+              fontWeight: FontWeight.w600,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
           ),
           const SizedBox(width: 12),
           for (final labelAndIntensity in const [
@@ -553,7 +569,9 @@ class _HeatmapLegend extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     border: labelAndIntensity.value == 0
                         ? Border.all(
-                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.1),
                           )
                         : null,
                   ),
@@ -564,9 +582,11 @@ class _HeatmapLegend extends StatelessWidget {
           Text(
             'More Spend',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
+              fontWeight: FontWeight.w600,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
           ),
         ],
       ),
@@ -575,10 +595,7 @@ class _HeatmapLegend extends StatelessWidget {
 }
 
 class _MonthNavButton extends StatelessWidget {
-  const _MonthNavButton({
-    required this.icon,
-    required this.onTap,
-  });
+  const _MonthNavButton({required this.icon, required this.onTap});
 
   final IconData icon;
   final VoidCallback onTap;
@@ -642,16 +659,13 @@ class _MetricCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text(label, style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 2),
                 Text(
                   value,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
@@ -662,10 +676,16 @@ class _MetricCard extends StatelessWidget {
   }
 }
 
-Map<DateTime, _HeatmapDayStats> _buildDailyStats(List<Transaction> transactions) {
+Map<DateTime, _HeatmapDayStats> _buildDailyStats(
+  List<Transaction> transactions,
+) {
   final stats = <DateTime, _HeatmapDayStats>{};
   for (final txn in transactions) {
-    final key = DateTime(txn.createdAt.year, txn.createdAt.month, txn.createdAt.day);
+    final key = DateTime(
+      txn.createdAt.year,
+      txn.createdAt.month,
+      txn.createdAt.day,
+    );
     final existing = stats[key] ?? const _HeatmapDayStats.empty();
     stats[key] = existing.add(txn);
   }
@@ -686,10 +706,10 @@ class _HeatmapDayStats {
   });
 
   const _HeatmapDayStats.empty()
-      : spent = 0,
-        income = 0,
-        count = 0,
-        categories = const {};
+    : spent = 0,
+      income = 0,
+      count = 0,
+      categories = const {};
 
   final double spent;
   final double income;

@@ -152,7 +152,7 @@ class _ContactPickerSheetState extends State<ContactPickerSheet> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                Icon(Icons.contacts_rounded,
+                const Icon(Icons.contacts_rounded,
                     color: AppTheme.primary, size: 22),
                 const SizedBox(width: 10),
                 Text(

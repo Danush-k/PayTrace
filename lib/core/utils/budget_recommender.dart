@@ -34,7 +34,7 @@ class BudgetRecommender {
         : monthlyIncome.reduce((a, b) => a + b) / monthlyIncome.length;
 
     final tiers = <BudgetTier>[];
-    final cs = AppConstants.currencySymbol;
+    const cs = AppConstants.currencySymbol;
 
     if (avgIncome > 0) {
       // Income-based tiers
