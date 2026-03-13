@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../core/utils/sms_transaction_parser.dart';
+import '../core/utils/transaction_extractor.dart';
 
 /// A parsed bank SMS indicating a UPI transaction (debit or credit).
 class BankSms {
@@ -39,21 +40,37 @@ class SmsService {
   /// Known financial sender IDs. Unknown senders are allowed only when
   /// strong transaction semantics are present in the message body.
   static const _financialSenderWhitelist = <String>{
-    'AXISBK',
-    'HDFCBK',
-    'ICICIB',
-    'SBIBNK',
-    'SBIINB',
-    'SBINOB',
+    'AXISBK', 'AXSBNK',
+    'HDFCBK', 'HDFCBN',
+    'ICICIB', 'ICICBK',
+    'SBIBNK', 'SBIINB', 'SBINOB', 'SBISMS',
     'PAYTMB',
     'PHONEPE',
     'GPAY',
-    'KOTAKB',
-    'PNBSMS',
-    'CANBNK',
-    'BOBSMS',
-    'INDBNK',
-    'IDFCFB',
+    'KOTAKB', 'KOTKBK',
+    'PNBSMS', 'PNBBNK',
+    'CANBNK', 'CNRBNK',
+    'BOBSMS', 'BARBOD',
+    'INDBNK', 'INDBKS',
+    'IDFCFB', 'IDFCBK',
+    'IOBCHN', 'IABORB', 'IOBBNK',
+    'YESBNK', 'YESBKN',
+    'FEDBKN', 'FEDBNK',
+    'UCOBNK',
+    'BOIIND', 'BOISTR',
+    'UBINBK', 'UNIONB',
+    'CENTBK',
+    'MAHABK',
+    'RBLBNK',
+    'BANDHN',
+    'INDUSB',
+    'DCBBKN',
+    'KRNBNK',
+    'TMBBKS',
+    'KVBBNK',
+    'CSBBNK',
+    'SOUBNK',
+    'JKBANK',
   };
 
   static const _channel = MethodChannel('com.paytrace.paytrace/upi');
@@ -285,52 +302,11 @@ class SmsService {
 
   /// Extract payee/payer name from bank SMS body.
   ///
-  /// Common patterns:
-  /// - "Sent to JOHN DOE via UPI"
-  /// - "paid to MERCHANT NAME"
-  /// - "transferred to PERSON NAME"
-  /// - "credited by SENDER NAME"
-  /// - "received from SENDER NAME"
-  /// - "from PERSON NAME-UPI"
-  /// - "Info: UPI/P2P/412345678901/JOHN DOE/person@ybl/SBI"
-  /// - "VPA person@ybl (JOHN DOE)"
+  /// v2: Now delegates to [TransactionExtractor.extractMerchant]
+  /// which uses 100+ regex patterns for comprehensive extraction
+  /// across all Indian bank SMS formats.
   static String? extractPayeeName(String text) {
-    final patterns = [
-      // "Info: UPI/.../PERSON NAME/vpa@bank" — SBI, HDFC, ICICI style
-      // Captures the name field between the ref number and the VPA
-      RegExp(r'(?:Info|info)\s*:?\s*UPI/[A-Za-z0-9]+/\d+/([A-Za-z][A-Za-z\s.]+?)/[a-zA-Z0-9._-]+@',
-          caseSensitive: false),
-      // "UPI/P2P/ref/PERSON NAME/vpa" or "UPI/P2M/ref/MERCHANT/vpa"
-      RegExp(r'UPI/[A-Za-z0-9]+/\d+/([A-Za-z][A-Za-z\s.]{1,30})/[a-zA-Z0-9._-]+@',
-          caseSensitive: false),
-      // "to PERSON via UPI" or "to PERSON UPI" (greedy, relaxed first char)
-      RegExp(r'(?:to|for)\s+([A-Za-z][A-Za-z\s.]+)\s+(?:via\s+)?(?:UPI|IMPS|NEFT)',
-          caseSensitive: false),
-      // "from PERSON via UPI" (for credits) — greedy
-      RegExp(r'(?:from|by)\s+([A-Za-z][A-Za-z\s.]+)\s+(?:via\s+)?(?:UPI|IMPS|NEFT)',
-          caseSensitive: false),
-      // "to PERSON Ref" or "from PERSON Ref" — greedy, relaxed
-      RegExp(r'(?:to|from|by)\s+([A-Za-z][A-Za-z\s.]{2,30})\s*(?:Ref|ref|REF|UPI)',
-          caseSensitive: false),
-      // "VPA person@bank (PERSON NAME)" — parenthesized name after VPA
-      RegExp(r'(?:VPA\s+)?[a-zA-Z0-9._-]+@[a-zA-Z]+\s*\(([A-Za-z][A-Za-z\s.]+?)\)',
-          caseSensitive: false),
-      // "to VPA person@bank" — extract VPA as fallback
-      RegExp(r'(?:to|from)\s+(?:VPA\s+)?([a-zA-Z0-9._-]+@[a-zA-Z]+)',
-          caseSensitive: false),
-    ];
-
-    for (final pattern in patterns) {
-      final match = pattern.firstMatch(text);
-      if (match != null) {
-        var name = match.group(1)?.trim();
-        if (name == null || name.length < 2 || name.length > 40) continue;
-        // Clean trailing prepositions / junk that greedy match may capture
-        name = name.replaceAll(RegExp(r'\s+(via|on|in|at|is|was|has|the)$', caseSensitive: false), '').trim();
-        if (name.length >= 2) return name;
-      }
-    }
-    return null;
+    return TransactionExtractor.extractMerchant(text);
   }
 
   /// Parse raw SMS data into a BankSms object.
