@@ -901,7 +901,9 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
   @override
   late final GeneratedColumn<String> id = GeneratedColumn<String>(
       'id', aliasedName, false,
-      type: DriftSqlType.string, requiredDuringInsert: true);
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      clientDefault: () => DateTime.now().microsecondsSinceEpoch.toString());
   static const VerificationMeta _upiIdMeta = const VerificationMeta('upiId');
   @override
   late final GeneratedColumn<String> upiId = GeneratedColumn<String>(
@@ -917,6 +919,12 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
   late final GeneratedColumn<String> phone = GeneratedColumn<String>(
       'phone', aliasedName, true,
       type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _categoryMeta =
+      const VerificationMeta('category');
+  @override
+  late final GeneratedColumn<String> category = GeneratedColumn<String>(
+      'category', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _transactionCountMeta =
       const VerificationMeta('transactionCount');
   @override
@@ -925,18 +933,28 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
       type: DriftSqlType.int,
       requiredDuringInsert: false,
       defaultValue: const Constant(0));
+  static const VerificationMeta _totalSentMeta =
+      const VerificationMeta('totalSent');
+  @override
+  late final GeneratedColumn<double> totalSent = GeneratedColumn<double>(
+      'total_sent', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0.0));
+  static const VerificationMeta _totalReceivedMeta =
+      const VerificationMeta('totalReceived');
+  @override
+  late final GeneratedColumn<double> totalReceived = GeneratedColumn<double>(
+      'total_received', aliasedName, false,
+      type: DriftSqlType.double,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(0.0));
   static const VerificationMeta _lastPaidAtMeta =
       const VerificationMeta('lastPaidAt');
   @override
   late final GeneratedColumn<DateTime> lastPaidAt = GeneratedColumn<DateTime>(
       'last_paid_at', aliasedName, true,
       type: DriftSqlType.dateTime, requiredDuringInsert: false);
-  static const VerificationMeta _categoryMeta =
-      const VerificationMeta('category');
-  @override
-  late final GeneratedColumn<String> category = GeneratedColumn<String>(
-      'category', aliasedName, true,
-      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _lastTransactionAtMeta =
       const VerificationMeta('lastTransactionAt');
   @override
@@ -951,17 +969,28 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
       type: DriftSqlType.dateTime,
       requiredDuringInsert: false,
       defaultValue: currentDateAndTime);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
   @override
   List<GeneratedColumn> get $columns => [
         id,
         upiId,
         name,
         phone,
-        transactionCount,
-        lastPaidAt,
         category,
+        transactionCount,
+        totalSent,
+        totalReceived,
+        lastPaidAt,
         lastTransactionAt,
-        createdAt
+        createdAt,
+        updatedAt
       ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -975,8 +1004,6 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
     final data = instance.toColumns(true);
     if (data.containsKey('id')) {
       context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
-    } else if (isInserting) {
-      context.missing(_idMeta);
     }
     if (data.containsKey('upi_id')) {
       context.handle(
@@ -994,21 +1021,31 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
       context.handle(
           _phoneMeta, phone.isAcceptableOrUnknown(data['phone']!, _phoneMeta));
     }
+    if (data.containsKey('category')) {
+      context.handle(_categoryMeta,
+          category.isAcceptableOrUnknown(data['category']!, _categoryMeta));
+    }
     if (data.containsKey('transaction_count')) {
       context.handle(
           _transactionCountMeta,
           transactionCount.isAcceptableOrUnknown(
               data['transaction_count']!, _transactionCountMeta));
     }
+    if (data.containsKey('total_sent')) {
+      context.handle(_totalSentMeta,
+          totalSent.isAcceptableOrUnknown(data['total_sent']!, _totalSentMeta));
+    }
+    if (data.containsKey('total_received')) {
+      context.handle(
+          _totalReceivedMeta,
+          totalReceived.isAcceptableOrUnknown(
+              data['total_received']!, _totalReceivedMeta));
+    }
     if (data.containsKey('last_paid_at')) {
       context.handle(
           _lastPaidAtMeta,
           lastPaidAt.isAcceptableOrUnknown(
               data['last_paid_at']!, _lastPaidAtMeta));
-    }
-    if (data.containsKey('category')) {
-      context.handle(_categoryMeta,
-          category.isAcceptableOrUnknown(data['category']!, _categoryMeta));
     }
     if (data.containsKey('last_transaction_at')) {
       context.handle(
@@ -1020,11 +1057,19 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
       context.handle(_createdAtMeta,
           createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
     }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    }
     return context;
   }
 
   @override
   Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+        {upiId},
+      ];
   @override
   Payee map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
@@ -1037,16 +1082,22 @@ class $PayeesTable extends Payees with TableInfo<$PayeesTable, Payee> {
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
       phone: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}phone']),
-      transactionCount: attachedDatabase.typeMapping
-          .read(DriftSqlType.int, data['${effectivePrefix}transaction_count'])!,
-      lastPaidAt: attachedDatabase.typeMapping
-          .read(DriftSqlType.dateTime, data['${effectivePrefix}last_paid_at']),
       category: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}category']),
+      transactionCount: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}transaction_count'])!,
+      totalSent: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}total_sent'])!,
+      totalReceived: attachedDatabase.typeMapping
+          .read(DriftSqlType.double, data['${effectivePrefix}total_received'])!,
+      lastPaidAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}last_paid_at']),
       lastTransactionAt: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}last_transaction_at']),
       createdAt: attachedDatabase.typeMapping
           .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
     );
   }
 
@@ -1061,21 +1112,27 @@ class Payee extends DataClass implements Insertable<Payee> {
   final String upiId;
   final String name;
   final String? phone;
-  final int transactionCount;
-  final DateTime? lastPaidAt;
   final String? category;
+  final int transactionCount;
+  final double totalSent;
+  final double totalReceived;
+  final DateTime? lastPaidAt;
   final DateTime? lastTransactionAt;
   final DateTime createdAt;
+  final DateTime updatedAt;
   const Payee(
       {required this.id,
       required this.upiId,
       required this.name,
       this.phone,
-      required this.transactionCount,
-      this.lastPaidAt,
       this.category,
+      required this.transactionCount,
+      required this.totalSent,
+      required this.totalReceived,
+      this.lastPaidAt,
       this.lastTransactionAt,
-      required this.createdAt});
+      required this.createdAt,
+      required this.updatedAt});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
@@ -1085,17 +1142,20 @@ class Payee extends DataClass implements Insertable<Payee> {
     if (!nullToAbsent || phone != null) {
       map['phone'] = Variable<String>(phone);
     }
-    map['transaction_count'] = Variable<int>(transactionCount);
-    if (!nullToAbsent || lastPaidAt != null) {
-      map['last_paid_at'] = Variable<DateTime>(lastPaidAt);
-    }
     if (!nullToAbsent || category != null) {
       map['category'] = Variable<String>(category);
+    }
+    map['transaction_count'] = Variable<int>(transactionCount);
+    map['total_sent'] = Variable<double>(totalSent);
+    map['total_received'] = Variable<double>(totalReceived);
+    if (!nullToAbsent || lastPaidAt != null) {
+      map['last_paid_at'] = Variable<DateTime>(lastPaidAt);
     }
     if (!nullToAbsent || lastTransactionAt != null) {
       map['last_transaction_at'] = Variable<DateTime>(lastTransactionAt);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
   }
 
@@ -1106,17 +1166,20 @@ class Payee extends DataClass implements Insertable<Payee> {
       name: Value(name),
       phone:
           phone == null && nullToAbsent ? const Value.absent() : Value(phone),
-      transactionCount: Value(transactionCount),
-      lastPaidAt: lastPaidAt == null && nullToAbsent
-          ? const Value.absent()
-          : Value(lastPaidAt),
       category: category == null && nullToAbsent
           ? const Value.absent()
           : Value(category),
+      transactionCount: Value(transactionCount),
+      totalSent: Value(totalSent),
+      totalReceived: Value(totalReceived),
+      lastPaidAt: lastPaidAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastPaidAt),
       lastTransactionAt: lastTransactionAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastTransactionAt),
       createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
     );
   }
 
@@ -1128,12 +1191,15 @@ class Payee extends DataClass implements Insertable<Payee> {
       upiId: serializer.fromJson<String>(json['upiId']),
       name: serializer.fromJson<String>(json['name']),
       phone: serializer.fromJson<String?>(json['phone']),
-      transactionCount: serializer.fromJson<int>(json['transactionCount']),
-      lastPaidAt: serializer.fromJson<DateTime?>(json['lastPaidAt']),
       category: serializer.fromJson<String?>(json['category']),
+      transactionCount: serializer.fromJson<int>(json['transactionCount']),
+      totalSent: serializer.fromJson<double>(json['totalSent']),
+      totalReceived: serializer.fromJson<double>(json['totalReceived']),
+      lastPaidAt: serializer.fromJson<DateTime?>(json['lastPaidAt']),
       lastTransactionAt:
           serializer.fromJson<DateTime?>(json['lastTransactionAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
   }
   @override
@@ -1144,11 +1210,14 @@ class Payee extends DataClass implements Insertable<Payee> {
       'upiId': serializer.toJson<String>(upiId),
       'name': serializer.toJson<String>(name),
       'phone': serializer.toJson<String?>(phone),
-      'transactionCount': serializer.toJson<int>(transactionCount),
-      'lastPaidAt': serializer.toJson<DateTime?>(lastPaidAt),
       'category': serializer.toJson<String?>(category),
+      'transactionCount': serializer.toJson<int>(transactionCount),
+      'totalSent': serializer.toJson<double>(totalSent),
+      'totalReceived': serializer.toJson<double>(totalReceived),
+      'lastPaidAt': serializer.toJson<DateTime?>(lastPaidAt),
       'lastTransactionAt': serializer.toJson<DateTime?>(lastTransactionAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
   }
 
@@ -1157,23 +1226,29 @@ class Payee extends DataClass implements Insertable<Payee> {
           String? upiId,
           String? name,
           Value<String?> phone = const Value.absent(),
-          int? transactionCount,
-          Value<DateTime?> lastPaidAt = const Value.absent(),
           Value<String?> category = const Value.absent(),
+          int? transactionCount,
+          double? totalSent,
+          double? totalReceived,
+          Value<DateTime?> lastPaidAt = const Value.absent(),
           Value<DateTime?> lastTransactionAt = const Value.absent(),
-          DateTime? createdAt}) =>
+          DateTime? createdAt,
+          DateTime? updatedAt}) =>
       Payee(
         id: id ?? this.id,
         upiId: upiId ?? this.upiId,
         name: name ?? this.name,
         phone: phone.present ? phone.value : this.phone,
-        transactionCount: transactionCount ?? this.transactionCount,
-        lastPaidAt: lastPaidAt.present ? lastPaidAt.value : this.lastPaidAt,
         category: category.present ? category.value : this.category,
+        transactionCount: transactionCount ?? this.transactionCount,
+        totalSent: totalSent ?? this.totalSent,
+        totalReceived: totalReceived ?? this.totalReceived,
+        lastPaidAt: lastPaidAt.present ? lastPaidAt.value : this.lastPaidAt,
         lastTransactionAt: lastTransactionAt.present
             ? lastTransactionAt.value
             : this.lastTransactionAt,
         createdAt: createdAt ?? this.createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
       );
   Payee copyWithCompanion(PayeesCompanion data) {
     return Payee(
@@ -1181,16 +1256,21 @@ class Payee extends DataClass implements Insertable<Payee> {
       upiId: data.upiId.present ? data.upiId.value : this.upiId,
       name: data.name.present ? data.name.value : this.name,
       phone: data.phone.present ? data.phone.value : this.phone,
+      category: data.category.present ? data.category.value : this.category,
       transactionCount: data.transactionCount.present
           ? data.transactionCount.value
           : this.transactionCount,
+      totalSent: data.totalSent.present ? data.totalSent.value : this.totalSent,
+      totalReceived: data.totalReceived.present
+          ? data.totalReceived.value
+          : this.totalReceived,
       lastPaidAt:
           data.lastPaidAt.present ? data.lastPaidAt.value : this.lastPaidAt,
-      category: data.category.present ? data.category.value : this.category,
       lastTransactionAt: data.lastTransactionAt.present
           ? data.lastTransactionAt.value
           : this.lastTransactionAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
@@ -1201,18 +1281,32 @@ class Payee extends DataClass implements Insertable<Payee> {
           ..write('upiId: $upiId, ')
           ..write('name: $name, ')
           ..write('phone: $phone, ')
-          ..write('transactionCount: $transactionCount, ')
-          ..write('lastPaidAt: $lastPaidAt, ')
           ..write('category: $category, ')
+          ..write('transactionCount: $transactionCount, ')
+          ..write('totalSent: $totalSent, ')
+          ..write('totalReceived: $totalReceived, ')
+          ..write('lastPaidAt: $lastPaidAt, ')
           ..write('lastTransactionAt: $lastTransactionAt, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, upiId, name, phone, transactionCount,
-      lastPaidAt, category, lastTransactionAt, createdAt);
+  int get hashCode => Object.hash(
+      id,
+      upiId,
+      name,
+      phone,
+      category,
+      transactionCount,
+      totalSent,
+      totalReceived,
+      lastPaidAt,
+      lastTransactionAt,
+      createdAt,
+      updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1221,11 +1315,14 @@ class Payee extends DataClass implements Insertable<Payee> {
           other.upiId == this.upiId &&
           other.name == this.name &&
           other.phone == this.phone &&
-          other.transactionCount == this.transactionCount &&
-          other.lastPaidAt == this.lastPaidAt &&
           other.category == this.category &&
+          other.transactionCount == this.transactionCount &&
+          other.totalSent == this.totalSent &&
+          other.totalReceived == this.totalReceived &&
+          other.lastPaidAt == this.lastPaidAt &&
           other.lastTransactionAt == this.lastTransactionAt &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
 }
 
 class PayeesCompanion extends UpdateCompanion<Payee> {
@@ -1233,48 +1330,59 @@ class PayeesCompanion extends UpdateCompanion<Payee> {
   final Value<String> upiId;
   final Value<String> name;
   final Value<String?> phone;
-  final Value<int> transactionCount;
-  final Value<DateTime?> lastPaidAt;
   final Value<String?> category;
+  final Value<int> transactionCount;
+  final Value<double> totalSent;
+  final Value<double> totalReceived;
+  final Value<DateTime?> lastPaidAt;
   final Value<DateTime?> lastTransactionAt;
   final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
   final Value<int> rowid;
   const PayeesCompanion({
     this.id = const Value.absent(),
     this.upiId = const Value.absent(),
     this.name = const Value.absent(),
     this.phone = const Value.absent(),
-    this.transactionCount = const Value.absent(),
-    this.lastPaidAt = const Value.absent(),
     this.category = const Value.absent(),
+    this.transactionCount = const Value.absent(),
+    this.totalSent = const Value.absent(),
+    this.totalReceived = const Value.absent(),
+    this.lastPaidAt = const Value.absent(),
     this.lastTransactionAt = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PayeesCompanion.insert({
-    required String id,
+    this.id = const Value.absent(),
     required String upiId,
     required String name,
     this.phone = const Value.absent(),
-    this.transactionCount = const Value.absent(),
-    this.lastPaidAt = const Value.absent(),
     this.category = const Value.absent(),
+    this.transactionCount = const Value.absent(),
+    this.totalSent = const Value.absent(),
+    this.totalReceived = const Value.absent(),
+    this.lastPaidAt = const Value.absent(),
     this.lastTransactionAt = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
-  })  : id = Value(id),
-        upiId = Value(upiId),
+  })  : upiId = Value(upiId),
         name = Value(name);
   static Insertable<Payee> custom({
     Expression<String>? id,
     Expression<String>? upiId,
     Expression<String>? name,
     Expression<String>? phone,
-    Expression<int>? transactionCount,
-    Expression<DateTime>? lastPaidAt,
     Expression<String>? category,
+    Expression<int>? transactionCount,
+    Expression<double>? totalSent,
+    Expression<double>? totalReceived,
+    Expression<DateTime>? lastPaidAt,
     Expression<DateTime>? lastTransactionAt,
     Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1282,11 +1390,14 @@ class PayeesCompanion extends UpdateCompanion<Payee> {
       if (upiId != null) 'upi_id': upiId,
       if (name != null) 'name': name,
       if (phone != null) 'phone': phone,
-      if (transactionCount != null) 'transaction_count': transactionCount,
-      if (lastPaidAt != null) 'last_paid_at': lastPaidAt,
       if (category != null) 'category': category,
+      if (transactionCount != null) 'transaction_count': transactionCount,
+      if (totalSent != null) 'total_sent': totalSent,
+      if (totalReceived != null) 'total_received': totalReceived,
+      if (lastPaidAt != null) 'last_paid_at': lastPaidAt,
       if (lastTransactionAt != null) 'last_transaction_at': lastTransactionAt,
       if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1296,22 +1407,28 @@ class PayeesCompanion extends UpdateCompanion<Payee> {
       Value<String>? upiId,
       Value<String>? name,
       Value<String?>? phone,
-      Value<int>? transactionCount,
-      Value<DateTime?>? lastPaidAt,
       Value<String?>? category,
+      Value<int>? transactionCount,
+      Value<double>? totalSent,
+      Value<double>? totalReceived,
+      Value<DateTime?>? lastPaidAt,
       Value<DateTime?>? lastTransactionAt,
       Value<DateTime>? createdAt,
+      Value<DateTime>? updatedAt,
       Value<int>? rowid}) {
     return PayeesCompanion(
       id: id ?? this.id,
       upiId: upiId ?? this.upiId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
-      transactionCount: transactionCount ?? this.transactionCount,
-      lastPaidAt: lastPaidAt ?? this.lastPaidAt,
       category: category ?? this.category,
+      transactionCount: transactionCount ?? this.transactionCount,
+      totalSent: totalSent ?? this.totalSent,
+      totalReceived: totalReceived ?? this.totalReceived,
+      lastPaidAt: lastPaidAt ?? this.lastPaidAt,
       lastTransactionAt: lastTransactionAt ?? this.lastTransactionAt,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1331,20 +1448,29 @@ class PayeesCompanion extends UpdateCompanion<Payee> {
     if (phone.present) {
       map['phone'] = Variable<String>(phone.value);
     }
+    if (category.present) {
+      map['category'] = Variable<String>(category.value);
+    }
     if (transactionCount.present) {
       map['transaction_count'] = Variable<int>(transactionCount.value);
     }
+    if (totalSent.present) {
+      map['total_sent'] = Variable<double>(totalSent.value);
+    }
+    if (totalReceived.present) {
+      map['total_received'] = Variable<double>(totalReceived.value);
+    }
     if (lastPaidAt.present) {
       map['last_paid_at'] = Variable<DateTime>(lastPaidAt.value);
-    }
-    if (category.present) {
-      map['category'] = Variable<String>(category.value);
     }
     if (lastTransactionAt.present) {
       map['last_transaction_at'] = Variable<DateTime>(lastTransactionAt.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -1359,11 +1485,14 @@ class PayeesCompanion extends UpdateCompanion<Payee> {
           ..write('upiId: $upiId, ')
           ..write('name: $name, ')
           ..write('phone: $phone, ')
-          ..write('transactionCount: $transactionCount, ')
-          ..write('lastPaidAt: $lastPaidAt, ')
           ..write('category: $category, ')
+          ..write('transactionCount: $transactionCount, ')
+          ..write('totalSent: $totalSent, ')
+          ..write('totalReceived: $totalReceived, ')
+          ..write('lastPaidAt: $lastPaidAt, ')
           ..write('lastTransactionAt: $lastTransactionAt, ')
           ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2327,15 +2456,18 @@ typedef $$TransactionsTableProcessedTableManager = ProcessedTableManager<
     Transaction,
     PrefetchHooks Function()>;
 typedef $$PayeesTableCreateCompanionBuilder = PayeesCompanion Function({
-  required String id,
+  Value<String> id,
   required String upiId,
   required String name,
   Value<String?> phone,
-  Value<int> transactionCount,
-  Value<DateTime?> lastPaidAt,
   Value<String?> category,
+  Value<int> transactionCount,
+  Value<double> totalSent,
+  Value<double> totalReceived,
+  Value<DateTime?> lastPaidAt,
   Value<DateTime?> lastTransactionAt,
   Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
   Value<int> rowid,
 });
 typedef $$PayeesTableUpdateCompanionBuilder = PayeesCompanion Function({
@@ -2343,11 +2475,14 @@ typedef $$PayeesTableUpdateCompanionBuilder = PayeesCompanion Function({
   Value<String> upiId,
   Value<String> name,
   Value<String?> phone,
-  Value<int> transactionCount,
-  Value<DateTime?> lastPaidAt,
   Value<String?> category,
+  Value<int> transactionCount,
+  Value<double> totalSent,
+  Value<double> totalReceived,
+  Value<DateTime?> lastPaidAt,
   Value<DateTime?> lastTransactionAt,
   Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
   Value<int> rowid,
 });
 
@@ -2372,15 +2507,21 @@ class $$PayeesTableFilterComposer
   ColumnFilters<String> get phone => $composableBuilder(
       column: $table.phone, builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<String> get category => $composableBuilder(
+      column: $table.category, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<int> get transactionCount => $composableBuilder(
       column: $table.transactionCount,
       builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<double> get totalSent => $composableBuilder(
+      column: $table.totalSent, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<double> get totalReceived => $composableBuilder(
+      column: $table.totalReceived, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<DateTime> get lastPaidAt => $composableBuilder(
       column: $table.lastPaidAt, builder: (column) => ColumnFilters(column));
-
-  ColumnFilters<String> get category => $composableBuilder(
-      column: $table.category, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get lastTransactionAt => $composableBuilder(
       column: $table.lastTransactionAt,
@@ -2388,6 +2529,9 @@ class $$PayeesTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
 }
 
 class $$PayeesTableOrderingComposer
@@ -2411,15 +2555,22 @@ class $$PayeesTableOrderingComposer
   ColumnOrderings<String> get phone => $composableBuilder(
       column: $table.phone, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get category => $composableBuilder(
+      column: $table.category, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<int> get transactionCount => $composableBuilder(
       column: $table.transactionCount,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<double> get totalSent => $composableBuilder(
+      column: $table.totalSent, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<double> get totalReceived => $composableBuilder(
+      column: $table.totalReceived,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get lastPaidAt => $composableBuilder(
       column: $table.lastPaidAt, builder: (column) => ColumnOrderings(column));
-
-  ColumnOrderings<String> get category => $composableBuilder(
-      column: $table.category, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<DateTime> get lastTransactionAt => $composableBuilder(
       column: $table.lastTransactionAt,
@@ -2427,6 +2578,9 @@ class $$PayeesTableOrderingComposer
 
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
       column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
 }
 
 class $$PayeesTableAnnotationComposer
@@ -2450,20 +2604,29 @@ class $$PayeesTableAnnotationComposer
   GeneratedColumn<String> get phone =>
       $composableBuilder(column: $table.phone, builder: (column) => column);
 
+  GeneratedColumn<String> get category =>
+      $composableBuilder(column: $table.category, builder: (column) => column);
+
   GeneratedColumn<int> get transactionCount => $composableBuilder(
       column: $table.transactionCount, builder: (column) => column);
 
+  GeneratedColumn<double> get totalSent =>
+      $composableBuilder(column: $table.totalSent, builder: (column) => column);
+
+  GeneratedColumn<double> get totalReceived => $composableBuilder(
+      column: $table.totalReceived, builder: (column) => column);
+
   GeneratedColumn<DateTime> get lastPaidAt => $composableBuilder(
       column: $table.lastPaidAt, builder: (column) => column);
-
-  GeneratedColumn<String> get category =>
-      $composableBuilder(column: $table.category, builder: (column) => column);
 
   GeneratedColumn<DateTime> get lastTransactionAt => $composableBuilder(
       column: $table.lastTransactionAt, builder: (column) => column);
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
 
 class $$PayeesTableTableManager extends RootTableManager<
@@ -2493,11 +2656,14 @@ class $$PayeesTableTableManager extends RootTableManager<
             Value<String> upiId = const Value.absent(),
             Value<String> name = const Value.absent(),
             Value<String?> phone = const Value.absent(),
-            Value<int> transactionCount = const Value.absent(),
-            Value<DateTime?> lastPaidAt = const Value.absent(),
             Value<String?> category = const Value.absent(),
+            Value<int> transactionCount = const Value.absent(),
+            Value<double> totalSent = const Value.absent(),
+            Value<double> totalReceived = const Value.absent(),
+            Value<DateTime?> lastPaidAt = const Value.absent(),
             Value<DateTime?> lastTransactionAt = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               PayeesCompanion(
@@ -2505,23 +2671,29 @@ class $$PayeesTableTableManager extends RootTableManager<
             upiId: upiId,
             name: name,
             phone: phone,
-            transactionCount: transactionCount,
-            lastPaidAt: lastPaidAt,
             category: category,
+            transactionCount: transactionCount,
+            totalSent: totalSent,
+            totalReceived: totalReceived,
+            lastPaidAt: lastPaidAt,
             lastTransactionAt: lastTransactionAt,
             createdAt: createdAt,
+            updatedAt: updatedAt,
             rowid: rowid,
           ),
           createCompanionCallback: ({
-            required String id,
+            Value<String> id = const Value.absent(),
             required String upiId,
             required String name,
             Value<String?> phone = const Value.absent(),
-            Value<int> transactionCount = const Value.absent(),
-            Value<DateTime?> lastPaidAt = const Value.absent(),
             Value<String?> category = const Value.absent(),
+            Value<int> transactionCount = const Value.absent(),
+            Value<double> totalSent = const Value.absent(),
+            Value<double> totalReceived = const Value.absent(),
+            Value<DateTime?> lastPaidAt = const Value.absent(),
             Value<DateTime?> lastTransactionAt = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
           }) =>
               PayeesCompanion.insert(
@@ -2529,11 +2701,14 @@ class $$PayeesTableTableManager extends RootTableManager<
             upiId: upiId,
             name: name,
             phone: phone,
-            transactionCount: transactionCount,
-            lastPaidAt: lastPaidAt,
             category: category,
+            transactionCount: transactionCount,
+            totalSent: totalSent,
+            totalReceived: totalReceived,
+            lastPaidAt: lastPaidAt,
             lastTransactionAt: lastTransactionAt,
             createdAt: createdAt,
+            updatedAt: updatedAt,
             rowid: rowid,
           ),
           withReferenceMapper: (p0) => p0

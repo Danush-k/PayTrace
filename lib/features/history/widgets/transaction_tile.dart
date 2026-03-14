@@ -19,7 +19,6 @@ class TransactionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusColor = AppTheme.statusColor(transaction.status);
-    final isSuccess = transaction.status == AppConstants.statusSuccess;
 
     return InkWell(
       onTap: onTap,

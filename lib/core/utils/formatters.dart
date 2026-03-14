@@ -11,6 +11,12 @@ class Formatters {
     decimalDigits: 2,
   );
 
+  static final _currencyFormatNoDecimals = NumberFormat.currency(
+    locale: 'en_IN',
+    symbol: '₹',
+    decimalDigits: 0,
+  );
+
   static final _compactCurrencyFormat = NumberFormat.compactCurrency(
     locale: 'en_IN',
     symbol: '₹',
@@ -19,6 +25,10 @@ class Formatters {
 
   /// Format amount as ₹1,234.56
   static String currency(double amount) => _currencyFormat.format(amount);
+
+  /// Format amount as ₹1,234 for chart labels and tooltips.
+  static String currencyWhole(num amount) =>
+      _currencyFormatNoDecimals.format(amount);
 
   /// Format amount as ₹1.2K, ₹3.4L etc.
   static String currencyCompact(double amount) =>

@@ -1,27 +1,36 @@
 import 'package:drift/drift.dart';
 
-/// Saved payees — contacts the user frequently pays
+/// Frequently used recipients for quick re-pay and insights.
 class Payees extends Table {
-  TextColumn get id => text()();
+  // Stable local identifier used by update/delete APIs.
+  TextColumn get id => text().clientDefault(
+    () => DateTime.now().microsecondsSinceEpoch.toString(),
+  )();
+
+  // Payee virtual payment address (unique logical identity).
   TextColumn get upiId => text()();
+
   TextColumn get name => text()();
   TextColumn get phone => text().nullable()();
 
-  // Usage tracking
-  IntColumn get transactionCount =>
-      integer().withDefault(const Constant(0))();
-  DateTimeColumn get lastPaidAt => dateTime().nullable()();
-
-  // Preferred expense category for this payee (null = not yet set)
+  // Optional learned category for this payee.
   TextColumn get category => text().nullable()();
 
-  // Last time a transaction to/from this payee was imported
+  IntColumn get transactionCount => integer().withDefault(const Constant(0))();
+  RealColumn get totalSent => real().withDefault(const Constant(0.0))();
+  RealColumn get totalReceived => real().withDefault(const Constant(0.0))();
+
+  DateTimeColumn get lastPaidAt => dateTime().nullable()();
   DateTimeColumn get lastTransactionAt => dateTime().nullable()();
 
-  // Timestamps
-  DateTimeColumn get createdAt =>
-      dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
   @override
   Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {upiId},
+  ];
 }

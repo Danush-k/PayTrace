@@ -675,24 +675,23 @@ class _DailySpendChartState extends ConsumerState<_DailySpendChart> {
               reservedSize: 42,
               interval: max(1, maxY / 3),
               getTitlesWidget: (value, _) {
-                if (value == 0 || value > maxY * 1.1)
+                if (value == 0 || value > maxY * 1.1) {
                   return const SizedBox.shrink();
-                String text;
-                if (value >= 1000) {
-                  text = '${(value / 1000).toStringAsFixed(1)}k';
-                } else {
-                  text = value.toInt().toString();
                 }
+                final text = value >= 1000
+                    ? Formatters.currencyCompact(value).replaceAll('K', 'k')
+                    : Formatters.currencyWhole(value);
                 return Padding(
                   padding: const EdgeInsets.only(right: 8.0),
                   child: Text(
-                    '?$text',
+                    text,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                       color: Theme.of(
                         context,
                       ).colorScheme.onSurface.withValues(alpha: 0.45),
+                      fontFamilyFallback: const ['Roboto', 'Noto Sans'],
                     ),
                     textAlign: TextAlign.right,
                   ),
@@ -706,8 +705,9 @@ class _DailySpendChartState extends ConsumerState<_DailySpendChart> {
               interval: max(1, (sortedDays.length / 6).floor()).toDouble(),
               getTitlesWidget: (value, _) {
                 final idx = value.toInt();
-                if (idx < 0 || idx >= sortedDays.length)
+                if (idx < 0 || idx >= sortedDays.length) {
                   return const SizedBox.shrink();
+                }
                 final date = sortedDays[idx];
                 return Padding(
                   padding: const EdgeInsets.only(top: 8.0),
@@ -742,11 +742,12 @@ class _DailySpendChartState extends ConsumerState<_DailySpendChart> {
               return touchedSpots.map((spot) {
                 final date = sortedDays[spot.x.toInt()];
                 return LineTooltipItem(
-                  '?${spot.y.toStringAsFixed(0)}\n',
+                  '${Formatters.currencyWhole(spot.y)}\n',
                   const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.w800,
                     fontSize: 16,
+                    fontFamilyFallback: ['Roboto', 'Noto Sans'],
                   ),
                   children: [
                     TextSpan(
@@ -755,6 +756,7 @@ class _DailySpendChartState extends ConsumerState<_DailySpendChart> {
                         color: Colors.white.withValues(alpha: 0.7),
                         fontWeight: FontWeight.w500,
                         fontSize: 11,
+                        fontFamilyFallback: const ['Roboto', 'Noto Sans'],
                       ),
                     ),
                   ],
@@ -963,7 +965,7 @@ class _TransactionTile extends StatelessWidget {
           ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
-          '${txn.category} � ${Formatters.dateRelative(txn.createdAt)}',
+          '${txn.category} • ${Formatters.dateRelative(txn.createdAt)}',
         ),
         trailing: Text(
           '${isDebit ? '-' : '+'}${Formatters.currency(txn.amount)}',

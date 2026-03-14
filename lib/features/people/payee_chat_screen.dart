@@ -501,7 +501,7 @@ class _TransactionBubble extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        '${CategoryEngine.categoryIcon(category)} $category',
+                        '${CategoryEngine.categoryIcon(category)} • $category',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w500,

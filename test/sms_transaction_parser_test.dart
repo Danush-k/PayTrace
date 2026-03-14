@@ -707,8 +707,7 @@ void main() {
       final messages = [
         {
           'sender': 'BK-SBIINB',
-          'body':
-              'Rs 500 debited from A/c XX1234 via UPI. Ref 812345678901',
+          'body': 'Rs 500 debited from A/c XX1234 via UPI. Ref 812345678901',
           'timestamp': now.millisecondsSinceEpoch.toString(),
         },
         {
@@ -718,8 +717,7 @@ void main() {
         },
         {
           'sender': 'BK-HDFCBK',
-          'body':
-              'Rs 1000 credited to A/c XX5678 via IMPS. Ref 912345678901',
+          'body': 'Rs 1000 credited to A/c XX5678 via IMPS. Ref 912345678901',
           'timestamp': now.millisecondsSinceEpoch.toString(),
         },
       ];
