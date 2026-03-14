@@ -73,6 +73,15 @@ class SmsService {
     'JKBANK',
   };
 
+  /// Returns true if the sender ID belongs to a known Indian bank.
+  static bool isWhitelistedSender(String sender) {
+    final normalized = sender
+        .replaceFirst(RegExp(r'^[A-Z]{2}-'), '')
+        .toUpperCase();
+    return _financialSenderWhitelist.contains(normalized) ||
+           _financialSenderWhitelist.any((s) => normalized.contains(s));
+  }
+
   static const _channel = MethodChannel('com.paytrace.paytrace/upi');
   static const _eventChannel =
       EventChannel('com.paytrace.paytrace/sms');
@@ -567,9 +576,12 @@ class SmsService {
   /// - "A/c no XX1234"
   static String? _extractAccountHint(String text) {
     final patterns = [
-      RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{4})\b'),
-      RegExp(r'account\s+(?:ending|no\.?)\s*[*xX]*(\d{4})\b',
+      RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+      RegExp(r'account\s+(?:ending|no\.?|number)?\s*[*xX]*(\d{3,4})\b',
           caseSensitive: false),
+      RegExp(r'[Aa]cct\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+      RegExp(r'\*{2,}(\d{3,4})\b'),
+      RegExp(r'XX(\d{3,4})\b'),
     ];
 
     for (final pattern in patterns) {

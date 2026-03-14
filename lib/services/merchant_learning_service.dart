@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../core/utils/category_engine.dart';
+import '../core/utils/merchant_identity.dart';
 import '../data/database/app_database.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -30,6 +31,7 @@ class MerchantLearningService {
   static const _noiseWords = {
     'ltd', 'llp', 'pvt', 'private', 'limited', 'india', 'the', 'and',
     'co', 'corp', 'corporation', 'inc', 'technologies', 'tech', 'services',
+    'payment', 'via', 'pay', 'bank', 'upi',
   };
 
   /// Compute the normalised merchant key for a payee.
@@ -91,37 +93,54 @@ class MerchantLearningService {
   //  Category resolution
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Resolve the category for [payeeName] / [upiId].
+  /// Resolve the category for a transaction.
   ///
-  /// 1. Check the learned merchant_categories table.
-  /// 2. Fall back to [CategoryEngine] keyword heuristics.
-  /// 3. Default → "Others".
+  /// When [merchantKey] is supplied (from [MerchantIdentity.buildKey]),
+  /// lookup uses it directly — solving the key-format mismatch bug where
+  /// category lookups failed because MerchantIdentity and MerchantLearning
+  /// used different key schemes.
+  ///
+  /// Fallback order:
+  ///   1. merchantKey lookup in merchant_categories
+  ///   2. Legacy normalizeKey lookup (auto-migrates to merchantKey on hit)
+  ///   3. CategoryEngine keyword heuristics
+  ///   4. "Others"
   static Future<String> categorize(
     AppDatabase db, {
     required String payeeName,
     required String upiId,
+    String? merchantKey,
   }) async {
-    final key = normalizeKey(payeeName, upiId);
-
-    // 1 — learned mapping
-    if (key.isNotEmpty) {
-      final learned = await db.getMerchantCategory(key);
+    // 1. Primary: use unified merchantKey
+    if (merchantKey != null && merchantKey.isNotEmpty) {
+      final learned = await db.getMerchantCategory(merchantKey);
       if (learned != null && learned.isNotEmpty) {
-        debugPrint(
-          'MerchantLearning: [$key] → "$learned" (from learned table)',
-        );
+        debugPrint('MerchantLearning: [$merchantKey] → "$learned" (learned)');
         return learned;
       }
     }
 
-    // 2 — keyword heuristics
+    // 2. Legacy key fallback (for data inserted before this change)
+    final legacyKey = normalizeKey(payeeName, upiId);
+    if (legacyKey.isNotEmpty) {
+      final learned = await db.getMerchantCategory(legacyKey);
+      if (learned != null && learned.isNotEmpty) {
+        debugPrint('MerchantLearning: [$legacyKey] → "$learned" (legacy)');
+        // Migrate to new key so future lookups use the unified key
+        if (merchantKey != null && merchantKey.isNotEmpty) {
+          await db.upsertMerchantCategory(merchantKey, learned);
+        }
+        return learned;
+      }
+    }
+
+    // 3. Keyword heuristics
     final heuristic = CategoryEngine.categorize(
       payeeName: payeeName,
       upiId: upiId,
     );
     debugPrint(
-      'MerchantLearning: [$key] → "$heuristic" (heuristic)',
-    );
+        'MerchantLearning: [${merchantKey ?? legacyKey}] → "$heuristic" (heuristic)');
     return heuristic;
   }
 
@@ -130,23 +149,22 @@ class MerchantLearningService {
   // ─────────────────────────────────────────────────────────────────────────
 
   /// Persist a user-chosen category for a merchant.
-  ///
-  /// Call this whenever the user manually changes a transaction's category.
-  /// All future transactions whose [normalizeKey] matches will use the stored
-  /// category instead of the heuristic fallback.
+  /// Stores under both the unified merchantKey AND the legacy key for compat.
   static Future<void> learn(
     AppDatabase db, {
     required String payeeName,
     required String upiId,
     required String category,
+    String? merchantKey,
   }) async {
-    final key = normalizeKey(payeeName, upiId);
-    if (key.isEmpty) return;
-
-    await db.upsertMerchantCategory(key, category);
-    debugPrint(
-      'MerchantLearning: learned [$key] → "$category"',
-    );
+    if (merchantKey != null && merchantKey.isNotEmpty) {
+      await db.upsertMerchantCategory(merchantKey, category);
+      debugPrint('MerchantLearning: learned [$merchantKey] → "$category"');
+    }
+    final legacyKey = normalizeKey(payeeName, upiId);
+    if (legacyKey.isNotEmpty && legacyKey != merchantKey) {
+      await db.upsertMerchantCategory(legacyKey, category);
+    }
   }
 
   /// Remove the learned category for a merchant (reset to heuristic).
@@ -154,10 +172,15 @@ class MerchantLearningService {
     AppDatabase db, {
     required String payeeName,
     required String upiId,
+    String? merchantKey,
   }) async {
-    final key = normalizeKey(payeeName, upiId);
-    if (key.isEmpty) return;
-    await db.deleteMerchantCategory(key);
-    debugPrint('MerchantLearning: forgot [$key]');
+    if (merchantKey != null && merchantKey.isNotEmpty) {
+      await db.deleteMerchantCategory(merchantKey);
+    }
+    final legacyKey = normalizeKey(payeeName, upiId);
+    if (legacyKey.isNotEmpty) {
+      await db.deleteMerchantCategory(legacyKey);
+    }
+    debugPrint('MerchantLearning: forgot [${merchantKey ?? legacyKey}]');
   }
 }

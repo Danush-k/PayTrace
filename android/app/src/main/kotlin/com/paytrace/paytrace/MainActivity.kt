@@ -19,7 +19,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val CHANNEL = "com.paytrace.paytrace/upi"
     private val EVENT_CHANNEL = "com.paytrace.paytrace/notifications"
     private val SMS_PERMISSION_CODE = 2001
-    private val MAX_SMS_SCAN = 1200
+    private val MAX_SMS_SCAN = 5000
     private val HISTORICAL_WINDOW_MS = 90L * 24 * 60 * 60 * 1000
 
     private var notificationEventSink: EventChannel.EventSink? = null

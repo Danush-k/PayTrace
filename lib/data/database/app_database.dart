@@ -24,7 +24,7 @@ class AppDatabase extends _$AppDatabase {
 
   // Bump this when schema changes
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -71,6 +71,31 @@ class AppDatabase extends _$AppDatabase {
             } catch (_) {}
             // Create merchant-category learning table
             await m.createTable(merchantCategories);
+          }
+          if (from < 6) {
+            // Add stable merchant key column to transactions
+            try {
+              await m.database.customStatement(
+                'ALTER TABLE transactions ADD COLUMN merchant_key TEXT',
+              );
+            } catch (_) {}
+            // Deduplicate payees: keep earliest row per upi_id
+            try {
+              await m.database.customStatement(
+                'DELETE FROM payees WHERE rowid NOT IN '
+                '(SELECT MIN(rowid) FROM payees GROUP BY upi_id)',
+              );
+            } catch (_) {}
+            // Enforce uniqueness on payees.upi_id going forward
+            await m.database.customStatement(
+              'CREATE UNIQUE INDEX IF NOT EXISTS idx_payee_upi_unique '
+              'ON payees(upi_id)',
+            );
+            // Index on merchant_key for fast merchant-grouped queries
+            await m.database.customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_txn_merchant_key '
+              'ON transactions(merchant_key)',
+            );
           }
         },
       );
@@ -121,7 +146,7 @@ class AppDatabase extends _$AppDatabase {
     return result > 0;
   }
 
-  /// Update transaction payee name (for user-edited SMS imports)
+  /// Update transaction payee name (single transaction only)
   Future<bool> updateTransactionPayeeName(String id, String name) async {
     final result = await (update(transactions)
           ..where((t) => t.id.equals(id)))
@@ -130,6 +155,29 @@ class AppDatabase extends _$AppDatabase {
       updatedAt: Value(DateTime.now()),
     ));
     return result > 0;
+  }
+
+  /// Batch-update payee name on ALL transactions sharing the same merchantKey.
+  /// This is the preferred rename path for identified merchants.
+  Future<int> updateAllTransactionsByMerchantKey(
+      String merchantKey, String name) async {
+    return (update(transactions)
+          ..where((t) => t.merchantKey.equals(merchantKey)))
+        .write(TransactionsCompanion(
+      payeeName: Value(name),
+      updatedAt: Value(DateTime.now()),
+    ));
+  }
+
+  /// Batch-update payee name on ALL transactions matching a UPI ID.
+  /// Fallback for legacy rows without a merchantKey.
+  Future<int> updateAllTransactionsPayeeName(String upiId, String name) async {
+    return (update(transactions)
+          ..where((t) => t.payeeUpiId.equals(upiId)))
+        .write(TransactionsCompanion(
+      payeeName: Value(name),
+      updatedAt: Value(DateTime.now()),
+    ));
   }
 
   /// Update transaction category
@@ -141,6 +189,18 @@ class AppDatabase extends _$AppDatabase {
       updatedAt: Value(DateTime.now()),
     ));
     return result > 0;
+  }
+
+  /// Batch-update category on ALL transactions sharing the same merchantKey.
+  /// Called when a user sets a category and wants it applied retroactively.
+  Future<int> batchUpdateCategoryByMerchantKey(
+      String merchantKey, String category) async {
+    return (update(transactions)
+          ..where((t) => t.merchantKey.equals(merchantKey)))
+        .write(TransactionsCompanion(
+      category: Value(category),
+      updatedAt: Value(DateTime.now()),
+    ));
   }
 
   /// Update transaction amount (used when amount is detected from SMS)
@@ -226,58 +286,150 @@ class AppDatabase extends _$AppDatabase {
           .getSingleOrNull();
 
   /// Check if a DEBIT transaction already exists with similar amount and time.
-  /// Intentionally ignores payee because app-tracked transactions store the
-  /// actual payee UPI ID, while bank SMS uses a different sender name.
-  /// Uses ±5 min window since bank SMS can arrive delayed.
+  /// Tolerance: amounts < ₹100 use exact match (0.01) to avoid false positives
+  /// on common small repeated payments (e.g. two separate ₹50 transactions).
+  /// Amounts ≥ ₹100 use ±₹1.00 for minor rounding differences.
   Future<bool> isDuplicateDebit({
     required double amount,
     required DateTime timestamp,
+    String? payeeUpiId,
   }) async {
     const window = Duration(minutes: 5);
     final start = timestamp.subtract(window);
     final end = timestamp.add(window);
-    final results = await customSelect(
-      'SELECT id FROM transactions '
-      'WHERE ABS(amount - ?) < 1.0 '
-      'AND direction = ? '
-      'AND created_at >= ? AND created_at <= ? '
-      'LIMIT 1',
-      variables: [
-        Variable.withReal(amount),
-        Variable.withString('DEBIT'),
-        Variable.withDateTime(start),
-        Variable.withDateTime(end),
-      ],
-    ).get();
+    final tolerance = amount < 100.0 ? 0.01 : 1.0;
+
+    String query = 'SELECT id FROM transactions '
+        'WHERE direction = ? '
+        'AND created_at >= ? AND created_at <= ? '
+        'AND ABS(amount - ?) < ? ';
+
+    final variables = <Variable>[
+      Variable.withString('DEBIT'),
+      Variable.withDateTime(start),
+      Variable.withDateTime(end),
+      Variable.withReal(amount),
+      Variable.withReal(tolerance),
+    ];
+
+    if (payeeUpiId != null && payeeUpiId.isNotEmpty) {
+      query += 'AND payee_upi_id = ? ';
+      variables.add(Variable.withString(payeeUpiId));
+    }
+
+    query += 'LIMIT 1';
+    final results = await customSelect(query, variables: variables).get();
     return results.isNotEmpty;
   }
 
   /// Check if an identical SMS-imported transaction already exists.
   /// Prevents the same SMS from being imported twice across syncs.
+  ///
+  /// When [payeeUpiId] is a real VPA (not a synthetic 'sms::' / 'notif::' ID),
+  /// the match also filters by payee so two completely different people sending
+  /// the same amount within a 5-min window don't accidentally de-duplicate.
   Future<bool> isDuplicateSmsImport({
     required double amount,
     required String direction,
     required DateTime timestamp,
+    String? payeeUpiId,
   }) async {
-    const window = Duration(minutes: 1);
+    // Use a tighter 1-min window for synthetic IDs; 5-min for real VPAs.
+    final isRealVpa = payeeUpiId != null &&
+        payeeUpiId.contains('@') &&
+        !payeeUpiId.startsWith('sms::') &&
+        !payeeUpiId.startsWith('notif::');
+    final window = isRealVpa ? const Duration(minutes: 5) : const Duration(minutes: 1);
+
     final start = timestamp.subtract(window);
     final end = timestamp.add(window);
+
+    String query = 'SELECT id FROM transactions '
+        'WHERE ABS(amount - ?) < 0.50 '
+        'AND direction = ? '
+        'AND created_at >= ? AND created_at <= ? ';
+
+    final variables = <Variable>[
+      Variable.withReal(amount),
+      Variable.withString(direction),
+      Variable.withDateTime(start),
+      Variable.withDateTime(end),
+    ];
+
+    // For real VPAs, also match payee to avoid false positives
+    if (isRealVpa) {
+      query += 'AND payee_upi_id = ? ';
+      variables.add(Variable.withString(payeeUpiId));
+    } else {
+      // For synthetic IDs, restrict to SMS_IMPORT mode only
+      query += 'AND payment_mode = ? ';
+      variables.add(Variable.withString('SMS_IMPORT'));
+    }
+
+    query += 'LIMIT 1';
+    final results = await customSelect(query, variables: variables).get();
+    return results.isNotEmpty;
+  }
+
+  /// ════════════════════════════════════════════════════════════════════════
+  ///  SMS PRIORITY OVERRIDES
+  /// ════════════════════════════════════════════════════════════════════════
+
+  /// Finds an existing transaction imported by the Notification Listener
+  /// that matches the given SMS parameters.
+  /// Used to allow the SMS to "overwrite" and upgrade the notification event.
+  Future<String?> findMatchingNotificationImport({
+    required double amount,
+    required String direction,
+    required DateTime timestamp,
+  }) async {
+    // 5-minute window to find the corresponding notification
+    final start = timestamp.subtract(const Duration(minutes: 5));
+    final end = timestamp.add(const Duration(minutes: 5));
+
     final results = await customSelect(
       'SELECT id FROM transactions '
       'WHERE ABS(amount - ?) < 0.50 '
       'AND direction = ? '
-      'AND payment_mode = ? '
+      'AND payment_mode = ? ' // Specifically look for Notification imports
       'AND created_at >= ? AND created_at <= ? '
       'LIMIT 1',
       variables: [
         Variable.withReal(amount),
         Variable.withString(direction),
-        Variable.withString('SMS_IMPORT'),
+        Variable.withString('NOTIF_IMPORT'),
         Variable.withDateTime(start),
         Variable.withDateTime(end),
       ],
     ).get();
-    return results.isNotEmpty;
+
+    if (results.isNotEmpty) {
+      return results.first.read<String>('id');
+    }
+    return null;
+  }
+
+  /// Upgrades an existing Notification-imported transaction with high-fidelity
+  /// data from an SMS (exact bank name, precise amount, stable merchant key).
+  Future<int> upgradeTransactionFromSms({
+    required String transactionId,
+    required String payeeUpiId,
+    required String payeeName,
+    required String merchantKey,
+    required String? category,
+  }) async {
+    return (update(transactions)..where((t) => t.id.equals(transactionId))).write(
+      TransactionsCompanion(
+        paymentMode: const Value('SMS_IMPORT'), // Upgrade the mode
+        payeeUpiId: Value(payeeUpiId),
+        payeeName: Value(payeeName),
+        merchantKey: Value(merchantKey),
+        category: category != null ? Value(category) : const Value.absent(),
+        updatedAt: Value(DateTime.now()),
+        // We append a note indicating it was upgraded to preserve history
+        transactionNote: const Value('Verified via Bank SMS'),
+      ),
+    );
   }
 
   /// Get total spent (successful transactions only)

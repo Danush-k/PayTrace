@@ -109,7 +109,6 @@ class NotificationService {
     final nativeAmountStr = data['parsed_amount'];
     final nativeMerchant  = data['parsed_merchant'];
     final nativeType      = data['parsed_type'];
-
     final double? amount;
     final String? payeeName;
     final bool isDebit;
@@ -120,7 +119,10 @@ class NotificationService {
       payeeName = (nativeMerchant != null && nativeMerchant.isNotEmpty)
           ? nativeMerchant
           : _extractPayeeName(combined, packageName);
-      isDebit   = nativeType != 'income';
+      
+      // Trust native income, but if it says expense, double check via Dart regex
+      // because native parsing might have fallen victim to the "debit card" footer bug.
+      isDebit = nativeType == 'income' ? false : _isDebit(combinedLower);
 
       debugPrint(
         'PayTrace: Notification (native-parsed) → pkg=$packageName, '
@@ -166,6 +168,7 @@ class NotificationService {
       RegExp(r'Rs\.?\s?([\d,]+\.?\d{0,2})', caseSensitive: false),
       RegExp(r'INR\s?([\d,]+\.?\d{0,2})', caseSensitive: false),
       RegExp(r'(?:paid|sent|debited|transferred)\s+(?:₹|Rs\.?|INR)?\s?([\d,]+\.?\d{0,2})', caseSensitive: false),
+      RegExp(r'(?:received|credited)\s+(?:₹|Rs\.?|INR)?\s?([\d,]+\.?\d{0,2})', caseSensitive: false),
     ];
 
     for (final pattern in patterns) {
@@ -184,33 +187,31 @@ class NotificationService {
 
   /// Check if notification indicates money was SENT (debit).
   static bool _isDebit(String text) {
-    final debitKeywords = [
-      'paid',
-      'sent',
-      'debited',
-      'transferred',
-      'payment successful',
-      'payment of',
-      'you paid',
-      'money sent',
-    ];
-    final creditKeywords = [
-      'received',
-      'credited',
-      'got',
-      'money received',
-      'you got',
-    ];
+    final lower = text.toLowerCase();
+    
+    // 1. Filter out deceptive instrument names
+    final cleanLower = lower
+        .replaceAll('debit card', 'instrument')
+        .replaceAll('credit card', 'instrument');
 
-    for (final kw in creditKeywords) {
-      if (text.contains(kw)) return false;
-    }
-    for (final kw in debitKeywords) {
-      if (text.contains(kw)) return true;
+    // 2. Priority 1: Strong INCOME signals (money received)
+    if (RegExp(r'\b(received|credited|got|money received|added to|refunded)\b').hasMatch(cleanLower)) {
+      return false;
     }
 
-    // Default to debit if amount is present (most payment notifications are debits)
-    return true;
+    // 3. Priority 2: Strong EXPENSE signals (money sent)
+    if (RegExp(r'\b(paid|sent|debited|transferred|money sent|purchase|spent)\b').hasMatch(cleanLower)) {
+      return true;
+    }
+
+    // 4. Fallback search (substring based)
+    final hasIncome = cleanLower.contains('receive') || cleanLower.contains('credit');
+    final hasExpense = cleanLower.contains('debit') || cleanLower.contains('spent');
+
+    if (hasIncome && !hasExpense) return false;
+    if (hasExpense && !hasIncome) return true;
+
+    return true; // Default to debit for safety
   }
 
   /// Try to extract payee name from notification text.
@@ -220,19 +221,33 @@ class NotificationService {
   /// - "Sent to xyz@ybl"
   /// - "Payment to Store Name successful"
   static String? _extractPayeeName(String text, String packageName) {
-    // Pattern: "to <name>" — capture what's after "to"
+    // 1. Check "from" patterns (Credit)
+    final fromPatterns = [
+      RegExp(r'(?:received|credited)\s+(?:from|by)\s+(.+?)(?:\s+on|\s+via|\s*[.!]|\s*$)', caseSensitive: false),
+      RegExp(r'(?:received|credited)\s+(?:₹|Rs\.?|INR)?\s?[\d,]+\.?\d{0,2}\s+(?:from|by)\s+(.+?)(?:\s+on|\s+via|\s*[.!]|\s*$)', caseSensitive: false),
+      RegExp(r'\bfrom\s+(.+?)(?:\s+on|\s+via|\s+using|\s*[.!]|\s*$)', caseSensitive: false),
+      RegExp(r'^(.+?)\s+has\s+sent\s+you', caseSensitive: false),
+    ];
+    
+    for (final pattern in fromPatterns) {
+      final match = pattern.firstMatch(text);
+      if (match != null) {
+        final name = match.group(1)?.trim();
+        if (name != null && name.isNotEmpty && name.length < 50) return name;
+      }
+    }
+
+    // 2. Pattern: "to <name>" — capture what's after "to" (Debit)
     final toPatterns = [
       RegExp(r'(?:paid|sent|transferred)\s+(?:₹|Rs\.?|INR)?\s?[\d,]+\.?\d{0,2}\s+to\s+(.+?)(?:\s+on|\s+via|\s*[.!]|\s*$)', caseSensitive: false),
-      RegExp(r'to\s+(.+?)(?:\s+on|\s+via|\s+using|\s+from|\s*[.!]|\s*$)', caseSensitive: false),
+      RegExp(r'\bto\s+(.+?)(?:\s+on|\s+via|\s+using|\s+from|\s*[.!]|\s*$)', caseSensitive: false),
     ];
 
     for (final pattern in toPatterns) {
       final match = pattern.firstMatch(text);
       if (match != null) {
         final name = match.group(1)?.trim();
-        if (name != null && name.isNotEmpty && name.length < 50) {
-          return name;
-        }
+        if (name != null && name.isNotEmpty && name.length < 50) return name;
       }
     }
 

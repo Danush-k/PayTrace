@@ -43,6 +43,12 @@ class Transactions extends Table {
   TextColumn get category =>
       text().withDefault(const Constant('Others'))();
 
+  // Stable merchant identity key — shared across all transactions from the
+  // same merchant regardless of import source (QR, SMS, notification).
+  // Format: 'vpa::ramesh@ybl' | 'personal::9876@ybl' | 'name::swiggy' |
+  //         'mc::MERCHANT123' | 'unknown::<ms>'
+  TextColumn get merchantKey => text().nullable()();
+
   // Direction: DEBIT (money sent) or CREDIT (money received)
   TextColumn get direction =>
       text().withDefault(const Constant('DEBIT'))();
