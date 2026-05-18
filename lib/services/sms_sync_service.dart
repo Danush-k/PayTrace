@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/database/app_database.dart';
+import '../core/utils/merchant_identity.dart';
+import '../core/utils/regex_pattern_library.dart';
 import '../core/utils/sms_transaction_parser.dart';
 import 'contact_lookup_service.dart';
 import 'merchant_learning_service.dart';
@@ -79,17 +81,22 @@ class SmsSyncService {
       int imported = 0;
 
       for (final sms in transactionSms) {
-        final smsHash = _smsHash(sms.body, sms.timestamp);
-        if (processedHashes.contains(smsHash)) {
-          continue;
-        }
+        try {
+          final smsHash = _smsHash(sms.body, sms.timestamp);
+          if (processedHashes.contains(smsHash)) {
+            continue;
+          }
 
-        // Use the intelligent parser for import; falls back gracefully
-        final wasImported = await _importSmsParsed(db, sms);
-        if (wasImported) {
-          imported++;
-          processedHashes.add(smsHash);
-          processedHashesDirty = true;
+          // Use the intelligent parser for import; falls back gracefully
+          final wasImported = await _importSmsParsed(db, sms);
+          if (wasImported) {
+            imported++;
+            processedHashes.add(smsHash);
+            processedHashesDirty = true;
+          }
+        } catch (e, st) {
+          // KEY FIX: Catch error per-SMS so one crash doesn't kill the batch
+          debugPrint('PayTrace SMS Sync: FAILED TO IMPORT INDIVIDUAL SMS: $e\n$st');
         }
       }
 
@@ -102,7 +109,7 @@ class SmsSyncService {
       debugPrint('PayTrace SMS Sync: Imported $imported new transactions');
       return imported;
     } catch (e) {
-      debugPrint('PayTrace SMS Sync: Error — $e');
+      debugPrint('PayTrace SMS Sync: CRITICAL SERVICE ERROR — $e');
       return 0;
     }
   }
@@ -123,13 +130,21 @@ class SmsSyncService {
       return false;
     }
 
-    // Promotional / marketing
-    if (lower.contains('offer') && lower.contains('cashback') ||
+    // Promotional / marketing (Only block banks if it's purely an offer with no CR/DR action)
+    if (lower.contains('offer') ||
+        lower.contains('cashback') ||
         lower.contains('congratulations') ||
         lower.contains('win ') ||
         lower.contains('discount') ||
         lower.contains('coupon')) {
-      return false;
+      
+      // If it's a bank and contains 'debited' or 'credited', it's a REAL transaction (e.g. cashback)
+      final isBankSender = SmsService.isWhitelistedSender(sms.sender);
+      if (isBankSender && (lower.contains('debited') || lower.contains('credited'))) {
+         // Keep it
+      } else {
+        return false;
+      }
     }
 
     // Subscription / plan / renewal notifications (OTT, telecom, etc.)
@@ -167,6 +182,7 @@ class SmsSyncService {
     // Balance check / mini statement
     if (lower.contains('available bal') ||
         lower.contains('avl bal') ||
+        lower.contains('avail.bal') ||
         lower.contains('mini statement') ||
         lower.contains('balance is rs') ||
         lower.contains('balance:')) {
@@ -189,6 +205,15 @@ class SmsSyncService {
     // Credit card bill alerts (not actual transactions)
     if (lower.contains('credit card') &&
         (lower.contains('bill') || lower.contains('due'))) {
+      return false;
+    }
+
+    // Card inactivity alerts (Canara Bank: "Debit Card ending 9001 has not been used")
+    if (lower.contains('card') &&
+        (lower.contains('not been used') ||
+         lower.contains('inactive') ||
+         lower.contains('keep it active') ||
+         lower.contains('inactiv'))) {
       return false;
     }
 
@@ -231,10 +256,12 @@ class SmsSyncService {
 
       // ═══ LAYER 3: SMS reimport guard ═══
       // Prevents the same SMS from creating a duplicate across multiple syncs.
+      final legacyPayeeUpiId = _extractUpiId(sms.body) ?? 'sms::${_sanitizeSender(sms.sender)}';
       final isSmsReimport = await db.isDuplicateSmsImport(
         amount: sms.amount!,
         direction: direction,
         timestamp: sms.timestamp,
+        payeeUpiId: legacyPayeeUpiId,
       );
       if (isSmsReimport) {
         debugPrint('PayTrace SMS Sync: SKIP [reimport] $direction ₹${sms.amount}');
@@ -242,8 +269,19 @@ class SmsSyncService {
       }
 
       // ═══ Resolve payee info ═══
-      final payeeUpiId = _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
+      // Bug fix: prefix synthetic IDs with 'sms::' — never bare bank sender
+      final payeeUpiId = _extractUpiId(sms.body) ??
+          'sms::${_sanitizeSender(sms.sender)}';
       final payeeName = await _resolvePayeeName(db, sms, payeeUpiId);
+
+      // Build stable merchantKey FIRST — needed for category lookup
+      final bankName = RegexPatternLibrary.detectBankFromSender(sms.sender);
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+        accountHint: sms.accountHint,
+        bankName: bankName,
+      );
 
       // ═══ Auto-categorize ═══
       final category = sms.isCredit
@@ -252,12 +290,11 @@ class SmsSyncService {
               db,
               payeeName: payeeName,
               upiId: payeeUpiId,
+              merchantKey: mKey,
             );
 
       // ═══ Insert transaction ═══
       final id = _uuid.v4();
-
-      // Store a clean transaction note from SMS (truncated, no raw dump)
       final note = _extractTransactionNote(sms);
 
       await db.insertTransaction(TransactionsCompanion(
@@ -271,6 +308,7 @@ class SmsSyncService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),
         transactionNote: Value(note),
         createdAt: Value(sms.timestamp),
         updatedAt: Value(DateTime.now()),
@@ -281,7 +319,7 @@ class SmsSyncService {
 
       debugPrint(
         'PayTrace SMS Sync: IMPORTED $direction ₹${sms.amount} '
-        '${sms.isCredit ? "from" : "to"} $payeeName ref=${sms.refNumber}',
+        '${sms.isCredit ? "from" : "to"} $payeeName [mKey=$mKey]',
       );
       return true;
     } catch (e) {
@@ -291,51 +329,60 @@ class SmsSyncService {
   }
 
   /// Resolve the best payee/payer name from SMS.
-  /// Priority:
-  ///   1. Contact lookup (phone number from UPI ID → device contacts)
-  ///   2. Existing payee in DB (user may have edited it before)
-  ///   3. Name extracted from SMS body
-  ///   4. Cleaned bank sender name
+  /// Priority order (fixed):
+  ///   1. SMS-extracted name — most specific to this individual transaction
+  ///   2. Existing payee in DB (user may have manually edited it)
+  ///      skipped if it's a bank name / 'Unknown' / app label
+  ///   3. Contact lookup — ONLY for phone-number VPAs
+  ///   4. UPI ID local-part → readable name (alpha only)
+  ///   5. Cleaned bank sender
   static Future<String> _resolvePayeeName(
     AppDatabase db,
     BankSms sms,
     String payeeUpiId,
   ) async {
-    // 1. Contact lookup — extract phone from UPI ID and match contacts
-    final contactName = await ContactLookupService.lookupFromUpiId(payeeUpiId);
-    if (contactName != null && contactName.isNotEmpty) {
-      debugPrint('PayTrace SMS Sync: Name from CONTACTS → $contactName');
-      return contactName;
+    // 1. SMS-extracted merchant/person name (most specific for this txn)
+    if (sms.payeeName != null &&
+        sms.payeeName!.isNotEmpty &&
+        !_bankNames.contains(sms.payeeName!)) {
+      debugPrint('PayTrace SMS Sync: Name from SMS → ${sms.payeeName}');
+      return sms.payeeName!;
     }
 
-    // 2. Existing payee in DB (user may have manually edited the name before)
+    // 2. Existing payee in DB — but skip bank names and generic values
     final existingPayee = await db.getPayeeByUpiId(payeeUpiId);
     if (existingPayee != null && existingPayee.name.isNotEmpty) {
-      // Don't reuse bank-code names (like "SBI", "HDFC Bank")
-      final isBankName = _bankNames.contains(existingPayee.name);
-      if (!isBankName) {
+      if (!_bankNames.contains(existingPayee.name) &&
+          existingPayee.name != 'Unknown' &&
+          !existingPayee.name.startsWith('Payment via ')) {
         debugPrint('PayTrace SMS Sync: Name from DB → ${existingPayee.name}');
         return existingPayee.name;
       }
     }
 
-    // 3. Name extracted from SMS body (e.g., "to JOHN DOE via UPI")
-    if (sms.payeeName != null && sms.payeeName!.isNotEmpty) {
-      return sms.payeeName!;
+    // 3. Contact lookup — ONLY for phone-number VPAs (9876543210@ybl)
+    final localPart = payeeUpiId.contains('@')
+        ? payeeUpiId.split('@').first
+        : payeeUpiId;
+    final isPhoneVpa = RegExp(r'^\d{8,}$').hasMatch(localPart);
+    if (isPhoneVpa) {
+      final contactName = await ContactLookupService.lookupFromUpiId(payeeUpiId);
+      if (contactName != null && contactName.isNotEmpty) {
+        debugPrint('PayTrace SMS Sync: Name from CONTACTS → $contactName');
+        return contactName;
+      }
     }
 
-    // 4. UPI ID → readable name (e.g., "john.doe@ybl" → "John Doe")
+    // 4. UPI ID → readable name (alpha local-part only)
     final upiId = _extractUpiId(sms.body);
     if (upiId != null) {
-      final localPart = upiId.split('@').first;
-      // Only use if it's not just digits (phone number)
-      if (RegExp(r'[a-zA-Z]').hasMatch(localPart)) {
-        final name = localPart
+      final lp = upiId.split('@').first;
+      if (RegExp(r'[a-zA-Z]').hasMatch(lp)) {
+        final name = lp
             .replaceAll(RegExp(r'[._-]'), ' ')
             .split(' ')
-            .map((w) => w.isNotEmpty
-                ? '${w[0].toUpperCase()}${w.substring(1)}'
-                : '')
+            .map((w) =>
+                w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '')
             .join(' ');
         if (name.length >= 2) return name;
       }
@@ -491,14 +538,24 @@ class SmsSyncService {
       // Always increment count and update last-paid
       await db.incrementPayeeCount(existing.id);
 
-      // Upgrade name if the current one is a bank code or generic
+      // Upgrade name only if the existing name is a bank code / generic label.
+      // Do NOT upgrade a real person/merchant name with a shorter or generic value.
       final existingIsBankName = _bankNames.contains(existing.name);
-      final newIsBetter = !_bankNames.contains(payeeName) &&
+      final existingIsSynthetic = existing.name.startsWith('sms::') ||
+          existing.name.startsWith('notif::') ||
+          existing.name.startsWith('unknown::') ||
+          existing.name.length <= 4;
+      final newIsReal = !_bankNames.contains(payeeName) &&
           payeeName != payeeUpiId &&
-          payeeName.length > existing.name.length;
-      if (existingIsBankName || (newIsBetter && existing.name.length <= 4)) {
+          payeeName.isNotEmpty &&
+          !payeeName.startsWith('sms::') &&
+          !payeeName.startsWith('notif::');
+
+      if ((existingIsBankName || existingIsSynthetic) && newIsReal) {
         await db.updatePayeeName(existing.id, payeeName);
-        debugPrint('PayTrace SMS Sync: Upgraded payee name "${existing.name}" → "$payeeName"');
+        debugPrint(
+          'PayTrace SMS Sync: Upgraded payee name "${existing.name}" → "$payeeName"',
+        );
       }
 
       // Set phone if previously missing
@@ -578,10 +635,75 @@ class SmsSyncService {
         }
       }
 
+      // Resolve payeeUpiId early so the dedup check can use it.
+      final payeeUpiId =
+          parsed.upiId ?? _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
+
+      // Use the parser-extracted merchant name as the primary name source.
+      // _resolvePayeeName may upgrade it via contacts/DB if available.
+      final parsedMerchant = parsed.merchant;
+      // Override sms.payeeName with the parser-extracted merchant so
+      // _resolvePayeeName prioritises SMS-extracted names correctly.
+      final smsWithMerchant = BankSms(
+        sender: sms.sender,
+        body: sms.body,
+        timestamp: sms.timestamp,
+        amount: sms.amount,
+        refNumber: sms.refNumber,
+        accountHint: sms.accountHint,
+        isCredit: sms.isCredit,
+        payeeName: parsedMerchant.isNotEmpty ? parsedMerchant : sms.payeeName,
+      );
+      final payeeName = await _resolvePayeeName(db, smsWithMerchant, payeeUpiId);
+
+      // Build stable merchantKey BEFORE insert and category lookup.
+      final bankName = RegexPatternLibrary.detectBankFromSender(sms.sender);
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+        accountHint: sms.accountHint,
+        bankName: bankName,
+      );
+
+      // Use the merchant key for category lookup so learned categories apply.
+      final category = parsed.category == 'Income'
+          ? 'Income'
+          : await MerchantLearningService.categorize(
+              db,
+              payeeName: payeeName,
+              upiId: payeeUpiId,
+              merchantKey: mKey,
+            );
+
+      // ─── SMS PRIORITY OVERRIDE ───
+      // Before checking for standard SMS duplicates, check if the real-time NotificationListener
+      // caught this payment first. If so, OVERWRITE it with this high-fidelity SMS data.
+      final matchingNotifId = await db.findMatchingNotificationImport(
+        amount: parsed.amount,
+        direction: direction,
+        timestamp: parsed.timestamp,
+      );
+
+      if (matchingNotifId != null) {
+        await db.upgradeTransactionFromSms(
+          transactionId: matchingNotifId,
+          payeeUpiId: payeeUpiId,
+          payeeName: payeeName,
+          merchantKey: mKey,
+          category: category,
+        );
+        debugPrint(
+          'PayTrace SMS Sync: UPGRADED Notification ID $matchingNotifId '
+          'with SMS data: $direction ₹${parsed.amount} → $payeeName',
+        );
+        return true; // We successfully handled this SMS.
+      }
+
       final isSmsReimport = await db.isDuplicateSmsImport(
         amount: parsed.amount,
         direction: direction,
         timestamp: parsed.timestamp,
+        payeeUpiId: payeeUpiId,
       );
       if (isSmsReimport) {
         debugPrint(
@@ -590,22 +712,6 @@ class SmsSyncService {
         );
         return false;
       }
-
-      // ═══ Resolve payee info ═══
-      final payeeUpiId =
-          parsed.upiId ?? _extractUpiId(sms.body) ?? _sanitizeSender(sms.sender);
-      final payeeName =
-          await _resolvePayeeName(db, sms, payeeUpiId) ;
-
-      // Use the parser's category (it already called CategoryEngine)
-      // but allow _resolvePayeeName to provide a better name.
-      final category = parsed.category == 'Income'
-          ? 'Income'
-          : await MerchantLearningService.categorize(
-              db,
-              payeeName: payeeName,
-              upiId: payeeUpiId,
-            );
 
       final id = _uuid.v4();
       final note = _extractTransactionNote(sms);
@@ -624,6 +730,7 @@ class SmsSyncService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),   // ← was missing; fixes rename-all + category batch-update
         transactionNote: Value(note),
         createdAt: Value(parsed.timestamp),
         updatedAt: Value(DateTime.now()),
@@ -634,7 +741,7 @@ class SmsSyncService {
       debugPrint(
         'PayTrace SMS Sync: IMPORTED (parser) $direction '
         '₹${parsed.amount} ${parsed.isIncome ? "from" : "to"} '
-        '$payeeName [${parsed.category}] '
+        '$payeeName [${parsed.category}] mKey=$mKey '
         'confidence=${(parsed.confidence * 100).toStringAsFixed(0)}%',
       );
       return true;

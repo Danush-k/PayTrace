@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/utils/merchant_identity.dart';
 import '../core/utils/sms_transaction_parser.dart';
 import '../data/database/app_database.dart';
 import 'contact_lookup_service.dart';
@@ -255,6 +256,15 @@ class TransactionFilter {
       return false;
     }
 
+    // Gate 4: Card inactivity / security alerts
+    if (lower.contains('card') &&
+        (lower.contains('not been used') ||
+         lower.contains('inactive') ||
+         lower.contains('keep it active'))) {
+      debugPrint('TransactionFilter: REJECT [card-inactivity]');
+      return false;
+    }
+
     return true;
   }
 }
@@ -421,11 +431,15 @@ class HistoricalSmsScannerService {
         }
       }
 
-      // Layer 3 — SMS reimport guard (same amount + direction ± 1 min)
+      // Layer 3 — SMS reimport guard (same amount + direction ± 1–5 min)
+      // Pass payeeUpiId for real VPAs to avoid false positives between two
+      // different people who sent the same amount in the same time window.
+      final histPayeeUpiId = parsed.upiId ?? _sanitizeSender(sender);
       final isSmsReimport = await db.isDuplicateSmsImport(
         amount: parsed.amount,
         direction: direction,
         timestamp: parsed.timestamp,
+        payeeUpiId: histPayeeUpiId,
       );
       if (isSmsReimport) {
         debugPrint(
@@ -444,12 +458,22 @@ class HistoricalSmsScannerService {
         sender: sender,
       );
 
+      // Build stable merchantKey for grouping and category lookup
+      final bankName = _sanitizeSender(sender);
+      final mKey = MerchantIdentity.buildKey(
+        upiId: payeeUpiId,
+        payeeName: payeeName,
+        accountHint: parsed.accountHint,
+        bankName: bankName,
+      );
+
       final category = parsed.isIncome
           ? 'Income'
           : await MerchantLearningService.categorize(
               db,
               payeeName: payeeName,
               upiId: payeeUpiId,
+              merchantKey: mKey,
             );
 
       // ── 7. Insert transaction ─────────────────────────────────────────
@@ -468,6 +492,7 @@ class HistoricalSmsScannerService {
         paymentMode: const Value('SMS_IMPORT'),
         category: Value(category),
         direction: Value(direction),
+        merchantKey: Value(mKey),
         transactionNote: Value(_extractNote(body)),
         createdAt: Value(timestamp),
         updatedAt: Value(DateTime.now()),

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/formatters.dart';
+import '../../core/utils/merchant_identity.dart';
 import '../../data/database/app_database.dart';
 import '../../services/merchant_learning_service.dart';
 import '../../state/providers.dart';
@@ -58,15 +59,14 @@ class TransactionDetailScreen extends ConsumerWidget {
                   dense: true,
                 ),
               ),
-              if (transaction.paymentMode == 'SMS_IMPORT')
-                const PopupMenuItem(
-                  value: 'edit_name',
-                  child: ListTile(
-                    leading: Icon(Icons.person_outline_rounded, size: 20),
-                    title: Text('Edit Name'),
-                    dense: true,
-                  ),
+              const PopupMenuItem(
+                value: 'edit_name',
+                child: ListTile(
+                  leading: Icon(Icons.person_outline_rounded, size: 20),
+                  title: Text('Edit Name'),
+                  dense: true,
                 ),
+              ),
               const PopupMenuItem(
                 value: 'copy',
                 child: ListTile(
@@ -436,26 +436,29 @@ class TransactionDetailScreen extends ConsumerWidget {
                     // 1. Update this transaction's category
                     await db.updateTransactionCategory(transaction.id, cat);
 
-                    // 2. Persist the merchant → category mapping so future
-                    //    transactions from the same merchant use this category.
+                    // 2. Persist the merchant → category mapping using the
+                    //    unified merchantKey so future lookups use it.
+                    final mKey = transaction.merchantKey;
                     await MerchantLearningService.learn(
                       db,
                       payeeName: transaction.payeeName,
                       upiId: transaction.payeeUpiId,
                       category: cat,
+                      merchantKey: mKey,
                     );
 
-                    final merchantKey = MerchantLearningService.normalizeKey(
-                      transaction.payeeName,
-                      transaction.payeeUpiId,
-                    );
+                    // 3. Batch-update category on all past transactions
+                    //    from the same merchant retroactively.
+                    if (mKey != null && !mKey.startsWith('unknown::')) {
+                      await db.batchUpdateCategoryByMerchantKey(mKey, cat);
+                    }
 
                     if (context.mounted) {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Category saved. "$merchantKey" will always be "$cat".',
+                            'Category saved for "${transaction.payeeName}" → "$cat".',
                           ),
                           backgroundColor: AppTheme.success,
                           duration: const Duration(seconds: 3),
@@ -501,11 +504,26 @@ class TransactionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// Show dialog to edit the payee/payer name for SMS-imported transactions.
-  /// The edited name is saved to both the transaction and the payee record
-  /// so it will be reused for future imports from the same UPI ID.
+  /// Show dialog to rename the payee/payer.
+  ///
+  /// Scope rules:
+  ///   • Named merchant (vpa:: / mc:: / name::): batch-rename ALL transactions
+  ///     sharing the same merchantKey so the user only has to rename once.
+  ///   • Phone-number VPA (personal::) or per-txn synthetic (unknown::):
+  ///     rename only this transaction to avoid re-naming a different person.
   void _showEditNameDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController(text: transaction.payeeName);
+    final mKey = transaction.merchantKey;
+
+    // Is this a "single scope" rename? True for phone-VPAs, synthetics, unknowns.
+    final isSingleScope = mKey == null ||
+        mKey.startsWith('unknown::') ||
+        mKey.startsWith('personal::') ||
+        mKey.startsWith('notif::');
+
+    final scopeLabel = isSingleScope
+        ? 'Only this transaction will be renamed.'
+        : 'All transactions from "${transaction.payeeName}" will be renamed.';
 
     showDialog(
       context: context,
@@ -517,8 +535,10 @@ class TransactionDetailScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Enter the name of the person. This will be remembered for future transactions from the same UPI ID.',
-              style: Theme.of(ctx).textTheme.bodySmall,
+              scopeLabel,
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: isSingleScope ? Colors.orange : Colors.blue,
+                  ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -527,7 +547,7 @@ class TransactionDetailScreen extends ConsumerWidget {
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 labelText: 'Name',
-                hintText: 'e.g. Mom, John Doe',
+                hintText: 'e.g. Rishabh Food Court, Mom',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -548,13 +568,46 @@ class TransactionDetailScreen extends ConsumerWidget {
 
               final db = ref.read(databaseProvider);
 
-              // Update transaction name
-              await db.updateTransactionPayeeName(transaction.id, name);
+              if (!isSingleScope) {
+                // Batch rename: all transactions from this merchant
+                await db.updateAllTransactionsByMerchantKey(mKey, name);
+                // Re-anchor the category to the new name so it isn't lost
+                await MerchantLearningService.learn(
+                  db,
+                  payeeName: name, // new name
+                  upiId: transaction.payeeUpiId,
+                  category: transaction.category,
+                  merchantKey: mKey, // keep same unified key if possible
+                );
+                // Also update the payee record
+                final payee = await db.getPayeeByUpiId(transaction.payeeUpiId);
+                if (payee != null) {
+                  await db.updatePayeeName(payee.id, name);
+                }
+              } else {
+                // Single rename: just this transaction
+                await db.updateTransactionPayeeName(transaction.id, name);
+                
+                // Learn the category for this specific person/synthetic ID
+                final newMKey = MerchantIdentity.buildKey(
+                  upiId: transaction.payeeUpiId,
+                  payeeName: name,
+                );
+                await MerchantLearningService.learn(
+                  db,
+                  payeeName: name,
+                  upiId: transaction.payeeUpiId,
+                  category: transaction.category,
+                  merchantKey: newMKey,
+                );
 
-              // Also update the payee record so future imports reuse this name
-              final payee = await db.getPayeeByUpiId(transaction.payeeUpiId);
-              if (payee != null) {
-                await db.updatePayeeName(payee.id, name);
+                // Update payee only if this is a stable UPI ID
+                if (!transaction.payeeUpiId.startsWith('notif::')) {
+                  final payee = await db.getPayeeByUpiId(transaction.payeeUpiId);
+                  if (payee != null) {
+                    await db.updatePayeeName(payee.id, name);
+                  }
+                }
               }
 
               if (ctx.mounted) Navigator.pop(ctx);
@@ -562,7 +615,11 @@ class TransactionDetailScreen extends ConsumerWidget {
                 Navigator.pop(context); // Pop detail screen to refresh
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Updated name to "$name"'),
+                    content: Text(
+                      isSingleScope
+                          ? 'Renamed to "$name".'
+                          : 'All "${transaction.payeeName}" transactions renamed to "$name".',
+                    ),
                     backgroundColor: AppTheme.success,
                   ),
                 );

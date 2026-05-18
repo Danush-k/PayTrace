@@ -268,6 +268,12 @@ class SmsTransactionParser {
       return null;
     }
 
+    // ═══ GATE 9: Reject card inactivity / security alerts ═══
+    if (_isCardInactivityAlert(lower)) {
+      _log('REJECT [card-inactivity] card inactivity or security alert');
+      return null;
+    }
+
     // ── All gates passed — extract structured data ──
 
     final type = _classifyType(lower);
@@ -426,52 +432,53 @@ class SmsTransactionParser {
       (lower.contains('credit card') &&
           (lower.contains('bill') || lower.contains('due')));
 
+  /// Reject card inactivity / security alerts.
+  /// Example: "Dear customer, your Debit Card ending 9001 has not been used
+  /// for the last 6 months. Use your card at an ATM/PoS/E-commerce to keep
+  /// it active. - Canara Bank"
+  static bool _isCardInactivityAlert(String lower) =>
+      (lower.contains('card') &&
+          (lower.contains('not been used') ||
+           lower.contains('inactive') ||
+           lower.contains('keep it active') ||
+           lower.contains('activate'))) ||
+      (lower.contains('block') && lower.contains('card') &&
+          !lower.contains('debited') && !lower.contains('credited'));
   // ─────────────────────────────────────────────────────────
   //  TYPE CLASSIFICATION
   // ─────────────────────────────────────────────────────────
 
   static String _classifyType(String lower) {
-    // Credit card payment SMS should be expense
-    if (lower.contains('credit card') && lower.contains('debited')) {
-      return 'expense';
-    }
+    // 1. Strong EXCLUSIONS (footers that act as noise)
+    // Concept: Filter out phrases that contain 'debit' or 'credit' but aren't the action.
+    final cleanLower = lower
+        .replaceAll('debit card', 'card_instrument')
+        .replaceAll('credit card', 'card_instrument');
 
-    // Strong income signals
-    if (lower.contains('credited') ||
-        lower.contains('deposited') ||
-        lower.contains('added to')) {
-      if (lower.contains('debited')) {
-        final debitIdx = lower.indexOf('debited');
-        final creditIdx = lower.indexOf('credited');
-        return debitIdx < creditIdx ? 'expense' : 'income';
+    // 2. Strong INCOME signals (received money)
+    // If 'credited' or 'received' appears as a verb, it's almost certainly income.
+    if (RegExp(r'\b(credited|deposited|added to|received|refunded)\b').hasMatch(cleanLower)) {
+      // Exception: If message says "debited ... for your credit card bill", it's an expense.
+      if (cleanLower.contains('debited') && cleanLower.contains('bill')) {
+        return 'expense';
       }
       return 'income';
     }
 
-    // Strong expense signals
-    if (lower.contains('debited') ||
-        lower.contains('withdrawn') ||
-        lower.contains('transferred')) {
+    // 3. Strong EXPENSE signals (sent money)
+    if (RegExp(r'\b(debited|withdrawn|sent|transferred|paid|purchase|spent)\b').hasMatch(cleanLower)) {
       return 'expense';
     }
 
-    if (lower.contains('received')) return 'income';
+    // 4. Fallback heuristics for bank codes (e.g., CR/DR abbreviations)
+    if (RegExp(r'\bcr\b').hasMatch(cleanLower) && !RegExp(r'\bdr\b').hasMatch(cleanLower)) {
+      return 'income';
+    }
+    if (RegExp(r'\bdr\b').hasMatch(cleanLower) && !RegExp(r'\bcr\b').hasMatch(cleanLower)) {
+      return 'expense';
+    }
 
-    // Check keyword dictionaries
-    const expenseKeywords = [
-      'debited', 'sent', 'paid', 'spent', 'transferred',
-      'withdrawn', 'purchase', 'debit',
-    ];
-    const incomeKeywords = [
-      'credited', 'received', 'deposited', 'added to', 'credit',
-    ];
-
-    final hasExpense = expenseKeywords.any((kw) => lower.contains(kw));
-    final hasIncome = incomeKeywords.any((kw) => lower.contains(kw));
-
-    if (hasIncome && !hasExpense) return 'income';
-    if (hasExpense) return 'expense';
-
+    // Default to expense for unknown financial SMS (safer for budgeting)
     return 'expense';
   }
 

@@ -106,6 +106,12 @@ class $TransactionsTable extends Transactions
       type: DriftSqlType.string,
       requiredDuringInsert: false,
       defaultValue: const Constant('Others'));
+  static const VerificationMeta _merchantKeyMeta =
+      const VerificationMeta('merchantKey');
+  @override
+  late final GeneratedColumn<String> merchantKey = GeneratedColumn<String>(
+      'merchant_key', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _directionMeta =
       const VerificationMeta('direction');
   @override
@@ -148,6 +154,7 @@ class $TransactionsTable extends Transactions
         upiApp,
         upiAppName,
         category,
+        merchantKey,
         direction,
         createdAt,
         updatedAt
@@ -251,6 +258,12 @@ class $TransactionsTable extends Transactions
       context.handle(_categoryMeta,
           category.isAcceptableOrUnknown(data['category']!, _categoryMeta));
     }
+    if (data.containsKey('merchant_key')) {
+      context.handle(
+          _merchantKeyMeta,
+          merchantKey.isAcceptableOrUnknown(
+              data['merchant_key']!, _merchantKeyMeta));
+    }
     if (data.containsKey('direction')) {
       context.handle(_directionMeta,
           direction.isAcceptableOrUnknown(data['direction']!, _directionMeta));
@@ -304,6 +317,8 @@ class $TransactionsTable extends Transactions
           .read(DriftSqlType.string, data['${effectivePrefix}upi_app_name']),
       category: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}category'])!,
+      merchantKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}merchant_key']),
       direction: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}direction'])!,
       createdAt: attachedDatabase.typeMapping
@@ -336,6 +351,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
   final String? upiApp;
   final String? upiAppName;
   final String category;
+  final String? merchantKey;
   final String direction;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -356,6 +372,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       this.upiApp,
       this.upiAppName,
       required this.category,
+      this.merchantKey,
       required this.direction,
       required this.createdAt,
       required this.updatedAt});
@@ -392,6 +409,9 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       map['upi_app_name'] = Variable<String>(upiAppName);
     }
     map['category'] = Variable<String>(category);
+    if (!nullToAbsent || merchantKey != null) {
+      map['merchant_key'] = Variable<String>(merchantKey);
+    }
     map['direction'] = Variable<String>(direction);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -428,6 +448,9 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ? const Value.absent()
           : Value(upiAppName),
       category: Value(category),
+      merchantKey: merchantKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(merchantKey),
       direction: Value(direction),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -454,6 +477,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       upiApp: serializer.fromJson<String?>(json['upiApp']),
       upiAppName: serializer.fromJson<String?>(json['upiAppName']),
       category: serializer.fromJson<String>(json['category']),
+      merchantKey: serializer.fromJson<String?>(json['merchantKey']),
       direction: serializer.fromJson<String>(json['direction']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -479,6 +503,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       'upiApp': serializer.toJson<String?>(upiApp),
       'upiAppName': serializer.toJson<String?>(upiAppName),
       'category': serializer.toJson<String>(category),
+      'merchantKey': serializer.toJson<String?>(merchantKey),
       'direction': serializer.toJson<String>(direction),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -502,6 +527,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           Value<String?> upiApp = const Value.absent(),
           Value<String?> upiAppName = const Value.absent(),
           String? category,
+          Value<String?> merchantKey = const Value.absent(),
           String? direction,
           DateTime? createdAt,
           DateTime? updatedAt}) =>
@@ -526,6 +552,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
         upiApp: upiApp.present ? upiApp.value : this.upiApp,
         upiAppName: upiAppName.present ? upiAppName.value : this.upiAppName,
         category: category ?? this.category,
+        merchantKey: merchantKey.present ? merchantKey.value : this.merchantKey,
         direction: direction ?? this.direction,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
@@ -559,6 +586,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       upiAppName:
           data.upiAppName.present ? data.upiAppName.value : this.upiAppName,
       category: data.category.present ? data.category.value : this.category,
+      merchantKey:
+          data.merchantKey.present ? data.merchantKey.value : this.merchantKey,
       direction: data.direction.present ? data.direction.value : this.direction,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -584,6 +613,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ..write('upiApp: $upiApp, ')
           ..write('upiAppName: $upiAppName, ')
           ..write('category: $category, ')
+          ..write('merchantKey: $merchantKey, ')
           ..write('direction: $direction, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -609,6 +639,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       upiApp,
       upiAppName,
       category,
+      merchantKey,
       direction,
       createdAt,
       updatedAt);
@@ -632,6 +663,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           other.upiApp == this.upiApp &&
           other.upiAppName == this.upiAppName &&
           other.category == this.category &&
+          other.merchantKey == this.merchantKey &&
           other.direction == this.direction &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -654,6 +686,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
   final Value<String?> upiApp;
   final Value<String?> upiAppName;
   final Value<String> category;
+  final Value<String?> merchantKey;
   final Value<String> direction;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -675,6 +708,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.upiApp = const Value.absent(),
     this.upiAppName = const Value.absent(),
     this.category = const Value.absent(),
+    this.merchantKey = const Value.absent(),
     this.direction = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -697,6 +731,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.upiApp = const Value.absent(),
     this.upiAppName = const Value.absent(),
     this.category = const Value.absent(),
+    this.merchantKey = const Value.absent(),
     this.direction = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -724,6 +759,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     Expression<String>? upiApp,
     Expression<String>? upiAppName,
     Expression<String>? category,
+    Expression<String>? merchantKey,
     Expression<String>? direction,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -746,6 +782,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       if (upiApp != null) 'upi_app': upiApp,
       if (upiAppName != null) 'upi_app_name': upiAppName,
       if (category != null) 'category': category,
+      if (merchantKey != null) 'merchant_key': merchantKey,
       if (direction != null) 'direction': direction,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -770,6 +807,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       Value<String?>? upiApp,
       Value<String?>? upiAppName,
       Value<String>? category,
+      Value<String?>? merchantKey,
       Value<String>? direction,
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt,
@@ -791,6 +829,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       upiApp: upiApp ?? this.upiApp,
       upiAppName: upiAppName ?? this.upiAppName,
       category: category ?? this.category,
+      merchantKey: merchantKey ?? this.merchantKey,
       direction: direction ?? this.direction,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -849,6 +888,9 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     if (category.present) {
       map['category'] = Variable<String>(category.value);
     }
+    if (merchantKey.present) {
+      map['merchant_key'] = Variable<String>(merchantKey.value);
+    }
     if (direction.present) {
       map['direction'] = Variable<String>(direction.value);
     }
@@ -883,6 +925,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
           ..write('upiApp: $upiApp, ')
           ..write('upiAppName: $upiAppName, ')
           ..write('category: $category, ')
+          ..write('merchantKey: $merchantKey, ')
           ..write('direction: $direction, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -1955,6 +1998,7 @@ typedef $$TransactionsTableCreateCompanionBuilder = TransactionsCompanion
   Value<String?> upiApp,
   Value<String?> upiAppName,
   Value<String> category,
+  Value<String?> merchantKey,
   Value<String> direction,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
@@ -1978,6 +2022,7 @@ typedef $$TransactionsTableUpdateCompanionBuilder = TransactionsCompanion
   Value<String?> upiApp,
   Value<String?> upiAppName,
   Value<String> category,
+  Value<String?> merchantKey,
   Value<String> direction,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
@@ -2042,6 +2087,9 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<String> get category => $composableBuilder(
       column: $table.category, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get direction => $composableBuilder(
       column: $table.direction, builder: (column) => ColumnFilters(column));
@@ -2114,6 +2162,9 @@ class $$TransactionsTableOrderingComposer
   ColumnOrderings<String> get category => $composableBuilder(
       column: $table.category, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get direction => $composableBuilder(
       column: $table.direction, builder: (column) => ColumnOrderings(column));
 
@@ -2181,6 +2232,9 @@ class $$TransactionsTableAnnotationComposer
   GeneratedColumn<String> get category =>
       $composableBuilder(column: $table.category, builder: (column) => column);
 
+  GeneratedColumn<String> get merchantKey => $composableBuilder(
+      column: $table.merchantKey, builder: (column) => column);
+
   GeneratedColumn<String> get direction =>
       $composableBuilder(column: $table.direction, builder: (column) => column);
 
@@ -2233,6 +2287,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<String?> upiApp = const Value.absent(),
             Value<String?> upiAppName = const Value.absent(),
             Value<String> category = const Value.absent(),
+            Value<String?> merchantKey = const Value.absent(),
             Value<String> direction = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
@@ -2255,6 +2310,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             upiApp: upiApp,
             upiAppName: upiAppName,
             category: category,
+            merchantKey: merchantKey,
             direction: direction,
             createdAt: createdAt,
             updatedAt: updatedAt,
@@ -2277,6 +2333,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<String?> upiApp = const Value.absent(),
             Value<String?> upiAppName = const Value.absent(),
             Value<String> category = const Value.absent(),
+            Value<String?> merchantKey = const Value.absent(),
             Value<String> direction = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
@@ -2299,6 +2356,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             upiApp: upiApp,
             upiAppName: upiAppName,
             category: category,
+            merchantKey: merchantKey,
             direction: direction,
             createdAt: createdAt,
             updatedAt: updatedAt,

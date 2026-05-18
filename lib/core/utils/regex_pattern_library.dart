@@ -155,7 +155,7 @@ class RegexPatternLibrary {
       // P13: "transferred to NAME via UPI/IMPS/NEFT"
       BankSmsPattern(
         regex: RegExp(
-          r'transferred\s+to\s+([A-Za-z][A-Za-z\s.]{1,35}?)\s+(?:via\s+)?(?:UPI|IMPS|NEFT|RTGS)',
+          r'transferred\s+to\s+([A-Za-z][A-Za-z\s.&,]{1,35}?)\s+(?:via\s+)?(?:UPI|IMPS|NEFT|RTGS)',
           caseSensitive: false,
         ),
         priority: 13,
@@ -165,7 +165,7 @@ class RegexPatternLibrary {
       // P14: "debited to NAME" / "to account of NAME"
       BankSmsPattern(
         regex: RegExp(
-          r'(?:debited|deducted)\s+(?:to\s+|(?:a/c\s+of\s+|account\s+of\s+))(?!(?:[Ff]or\s+|[Rr]s\.?))([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS|w\.?e\.?f|towards|for[.\s])|\s*[.])',
+          r'(?:debited|deducted)\s+(?:to\s+|(?:a/c\s+of\s+|account\s+of\s+))(?!(?:[Ff]or\s+|[Rr]s\.?))([A-Za-z][A-Za-z\s.&,]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS|w\.?e\.?f|towards|for[.\s])|\s*[.])',
           caseSensitive: false,
         ),
         priority: 14,
@@ -175,21 +175,102 @@ class RegexPatternLibrary {
       // P15: "credited from NAME" / "received from NAME"
       BankSmsPattern(
         regex: RegExp(
-          r'(?:credited|received)\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS|in\s+your)|\s*[.])',
+          r'(?:credited|received)\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS|in\s+your)|[.,]|\s*$)',
           caseSensitive: false,
         ),
         priority: 15,
         description: 'credited from NAME',
       ),
 
-      // P16: "credited by NAME"
+      // P16: "credited by NAME" — also handles "credited to a/c XX by NAME"
       BankSmsPattern(
         regex: RegExp(
-          r'(?:credited|received)\s+.*?\s+by\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS|[.])|\s*$)',
+          r'credited(?:\s+to\s+(?:your\s+)?(?:a/c|acct|account)\s*[*xX\d]+)?\s+(?:\S+\s+)?by\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT|RTGS)|[-\u2013]\s*(?:UPI|IMPS|NEFT)|[.,]|\s*$)',
           caseSensitive: false,
         ),
         priority: 16,
-        description: 'credited by NAME',
+        description: 'credited by NAME (incl. credited to a/c XX by NAME)',
+      ),
+
+      // P16a: "credited with INR X from NAME" (IOB, ICICI common format)
+      BankSmsPattern(
+        regex: RegExp(
+          r'credited\s+with\s+(?:Rs\.?|INR|\u20b9)\s*[\d,.]+\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT)|[.,]|\s*$)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'credited with INR X from NAME',
+      ),
+
+      // P16b: "Received Rs.X from NAME" — BHIM / GPay / direct
+      BankSmsPattern(
+        regex: RegExp(
+          r'[Rr]eceived\s+(?:Rs\.?|INR|\u20b9)\s*[\d,.]+\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS|NEFT)|[.,]|\s*$)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'Received Rs.X from NAME',
+      ),
+
+      // P16c: "NAME has sent you Rs.X" — Google Pay / PhonePe credit
+      BankSmsPattern(
+        regex: RegExp(
+          r'^([A-Za-z][A-Za-z\s.]{2,35}?)\s+has\s+sent\s+you\s+(?:Rs\.?|INR|\u20b9)',
+          caseSensitive: false,
+          multiLine: true,
+        ),
+        priority: 16,
+        description: 'NAME has sent you Rs.X (GPay/PhonePe style)',
+      ),
+
+      // P16d: "from NAME using UPI/IMPS" — credit via payment mode
+      BankSmsPattern(
+        regex: RegExp(
+          r'from\s+([A-Za-z][A-Za-z\s.]{2,35}?)\s+using\s+(?:UPI|IMPS|NEFT|RTGS)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'from NAME using UPI',
+      ),
+
+      // P16e: "amount received from NAME" — Indian Bank / Canara / IOB
+      BankSmsPattern(
+        regex: RegExp(
+          r'(?:an\s+)?(?:amount|amt)\s+(?:of\s+)?(?:Rs\.?|INR|\u20b9)\s*[\d,.]+\s+(?:has\s+been\s+)?received\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS)|[.,]|\s*$)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'amount received from NAME',
+      ),
+
+      // P16f: "credited to your a/c from NAME" — SBI / PNB
+      BankSmsPattern(
+        regex: RegExp(
+          r'credited\s+to\s+your\s+(?:a/c|acct|account)\s*[*xX\d]+\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS)|[.,]|\s*$)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'SBI: credited to your a/c from NAME',
+      ),
+
+      // P16g: "You have received Rs.X from NAME" — polite bank format
+      BankSmsPattern(
+        regex: RegExp(
+          r'[Yy]ou\s+ha(?:ve|s)\s+received\s+(?:Rs\.?|INR|\u20b9)\s*[\d,.]+\s+from\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|on|Ref|UPI|IMPS)|[.,]|\s*$)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'You have received Rs.X from NAME',
+      ),
+
+      // P16h: amount credited by NAME-UPI (SBI style "credited by NAME-UPI")
+      BankSmsPattern(
+        regex: RegExp(
+          r'(?:Rs\.?|INR|\u20b9)\s*[\d,.]+\s+credited\s+by\s+([A-Za-z][A-Za-z\s.]{2,35}?)[-\u2013]\s*(?:UPI|IMPS|NEFT)',
+          caseSensitive: false,
+        ),
+        priority: 16,
+        description: 'SBI: Rs.X credited by NAME-UPI',
       ),
 
       // P17: "to NAME from A/c" — "sent ₹500 to MERCHANT from A/c XX1234"
@@ -254,11 +335,21 @@ class RegexPatternLibrary {
       // P23: "trf to NAME" — common in bank SMS
       BankSmsPattern(
         regex: RegExp(
-          r'(?:trf|transfer|xfer)\s+to\s+([A-Za-z][A-Za-z\s.]{2,35}?)(?:\s+(?:via|Ref|UPI|IMPS|NEFT|RTGS|[.(])|\s*$)',
+          r'(?:trf|transfer|xfer)\s+to\s+([A-Za-z][A-Za-z\s.&,]{2,35}?)(?:\s+(?:via|Ref|UPI|IMPS|NEFT|RTGS|[.(])|\s*$)',
           caseSensitive: false,
         ),
         priority: 23,
         description: 'trf to NAME',
+      ),
+
+      // P23c: "paid ... to NAME, UPI Ref" (Canara style with comma)
+      BankSmsPattern(
+        regex: RegExp(
+          r'paid\s+(?:thru\s+)?(?:A/C|a/c)\s+[*xX\d]+\s+on\s+[\d-]+\s+[\d:]+\s+to\s+([A-Za-z][A-Za-z\s.&]{1,35}?),?\s+UPI\s+Ref',
+          caseSensitive: false,
+        ),
+        priority: 11,
+        description: 'Canara: paid to NAME, UPI Ref',
       ),
 
       // P23b: "credited to NAME" — HDFC / Generic
@@ -559,6 +650,28 @@ class RegexPatternLibrary {
         ),
         priority: 64,
         description: 'PNB: has been debited to NAME from',
+      ),
+
+      // ── Canara Bank Generic Patterns ──
+
+      // P72: "CREDITED to your account [AC]" (Canara generic)
+      BankSmsPattern(
+        regex: RegExp(
+          r'(?:CREDITED|DEBITED)\s+to\s+your\s+account\s+[*xX]*(\d{3,4})',
+          caseSensitive: true,
+        ),
+        priority: 72,
+        description: 'Canara: CREDITED/DEBITED to your account XXX',
+      ),
+
+      // P73: "... credited with Rs.X from a/c no. XX1234" (Canara account credit)
+      BankSmsPattern(
+        regex: RegExp(
+          r'credited\s+with\s+(?:Rs\.?|INR|₹)\s*[\d,.]+\s+from\s+a/c\s+no\.\s+[*xX]*(\d{3,4})',
+          caseSensitive: false,
+        ),
+        priority: 73,
+        description: 'Canara: credited from a/c no. XXX',
       ),
 
       // P65: PNB "Rs.X transferred to NAME through UPI"
@@ -1096,14 +1209,12 @@ class RegexPatternLibrary {
   // ═══════════════════════════════════════════════════════════════
 
   static final accountHintPatterns = <RegExp>[
-    RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{4})\b'),
-    RegExp(r'[Aa]cct\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{4})\b'),
-    RegExp(r'account\s+(?:ending|no\.?|number)\s*[*xX]*(\d{4})\b',
+    RegExp(r'[Aa]/[Cc]\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+    RegExp(r'account\s+(?:ending|no\.?|number)?\s*[*xX]*(\d{3,4})\b',
         caseSensitive: false),
-    RegExp(r'(?:card|Card)\s+(?:ending|no\.?|number|xx)\s*[*xX]*(\d{4})\b',
-        caseSensitive: false),
-    RegExp(r'\*{2,}(\d{4})\b'),
-    RegExp(r'XX(\d{4})\b'),
+    RegExp(r'[Aa]cct\s*(?:[Nn]o)?\.?\s*[*xX]*(\d{3,4})\b'),
+    RegExp(r'\*{2,}(\d{3,4})\b'),
+    RegExp(r'XX(\d{3,4})\b'),
   ];
 }
 
